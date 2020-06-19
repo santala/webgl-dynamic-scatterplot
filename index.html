@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+    <title>WebGL Dynamic Scatterplot</title>
+    <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<img id="overlap" src="overlap.png" style="display: none"/>
+
+<canvas id="canvas"></canvas>
+<div id="uiContainer">
+    <div id="ui"></div>
+</div>
+
+<!-- vertex shader -->
+<script id="vertex-shader-2d" type="x-shader/x-vertex">
+attribute vec2 a_position;
+attribute vec2 a_texCoord;
+
+uniform vec2 u_resolution;
+uniform float u_flipY;
+
+varying vec2 v_texCoord;
+
+void main() {
+   // convert the rectangle from pixels to 0.0 to 1.0
+   vec2 zeroToOne = a_position / u_resolution;
+
+   // convert from 0->1 to 0->2
+   vec2 zeroToTwo = zeroToOne * 2.0;
+
+   // convert from 0->2 to -1->+1 (clipspace)
+   vec2 clipSpace = zeroToTwo - 1.0;
+
+   gl_Position = vec4(clipSpace * vec2(1, u_flipY), 0, 1);
+
+   // pass the texCoord to the fragment shader
+   // The GPU will interpolate this value between points.
+   v_texCoord = a_texCoord;
+}
+</script>
+<!-- fragment shader -->
+<script id="fragment-shader-2d" type="x-shader/x-fragment">
+
+    precision mediump float;
+
+    // our texture
+    uniform sampler2D u_image;
+    uniform vec2 u_textureSize;
+    uniform float u_kernel[9];
+    uniform float u_kernelWeight;
+
+    uniform int u_stage;
+
+    uniform vec2 u_srcSize;
+    uniform vec2 u_dstSize;
+
+    // the texCoords passed in from the vertex shader.
+    varying vec2 v_texCoord;
+
+    void main() {
+        if (u_stage == 0) {
+            // Downscale density map
+
+            vec2 scale = u_srcSize / u_dstSize;
+
+            vec2 srcPixelSize = 1. / u_srcSize;
+            vec2 dstPixelSize = 1. / u_dstSize;
+
+            float count = 0.;
+            float xOffset = 0.;
+            float yOffset = 0.;
+
+            //np.round(np.arange(new_width + 1) * (old_width / new_width)).astype(np.int16)
+
+            ivec2 dstPixel = ivec2(v_texCoord * u_dstSize);
+            ivec2 srcPixelStart = ivec2(vec2(dstPixel) * scale);
+            ivec2 srcPixelEnd = ivec2(vec2(dstPixel + 1) * scale);
+
+            vec2 startF = vec2(srcPixelStart) / u_srcSize;
+            vec2 endF = vec2(srcPixelEnd) / u_srcSize;
+
+            float x = startF.x;
+            float y = startF.y;
+            int xSample = 0;
+            int ySample = 0;
+
+            for (int i = 0; i < 9999; i++) {
+                if (x >= endF.x) {
+                    break;
+                }
+                for (int j = 0; j < 9999; j++) {
+                    if (y >= endF.y) {
+                        break;
+                    }
+
+                    vec4 dataSample = texture2D(u_image, vec2(x, y));
+
+                    count += (dataSample.z * 256. + dataSample.w) * 255.;
+                    xOffset += dataSample.x;
+                    yOffset += dataSample.y;
+
+                    ySample++;
+                    //y += srcPixelSize.y;
+                    y = startF.y + float(ySample) * srcPixelSize.y;
+                }
+                xSample++;
+                //x += srcPixelSize.x;
+                x = startF.x + float(xSample) * srcPixelSize.x;
+            }
+
+            gl_FragColor = vec4(xOffset / count, yOffset / count, floor(count / 256.) / 255.,  mod(count, 256.) / 255.);
+            //gl_FragColor = vec4(xOffset / count, yOffset / count, 0,  count / 255.);
+            //gl_FragColor = vec4(floor(count / 256.) / 255., mod(count, 256.) / 255., 0, 0);
+
+        } else if (u_stage == 1) {
+            // Apply marker
+
+            gl_FragColor = vec4(texture2D(u_image, v_texCoord));//vec4(texture2D(u_image, v_texCoord).r, 0, 0, 1);
+        } else if (u_stage == 2) {
+            // Look up alpha
+            vec4 dataSample = texture2D(u_image, v_texCoord);
+            float overlap = (dataSample.z * 256. + dataSample.w) * 255.;
+            float alpha = .5;
+            float opacity;
+            if (overlap == 0.) {
+                opacity = 0.;
+            } else {
+                opacity = 1. - pow(1. - alpha, overlap);
+            }
+
+            gl_FragColor = vec4(0, 0, 0, opacity);//vec4(texture2D(u_image, v_texCoord).r, 0, 0, 1);
+        } else {
+            // Unknown stage, return red.
+            gl_FragColor = vec4(1, 0, 0, 1);
+        }
+    }
+</script>
+
+<script id="fragment-shader-2d-orig" type="x-shader/x-fragment">
+    precision mediump float;
+
+    // our texture
+    uniform sampler2D u_image;
+    uniform vec2 u_textureSize;
+    uniform float u_kernel[9];
+    uniform float u_kernelWeight;
+
+    // the texCoords passed in from the vertex shader.
+    varying vec2 v_texCoord;
+
+    void main() {
+        vec2 onePixel = vec2(1.0, 1.0) / u_textureSize;
+        vec4 colorSum =
+        texture2D(u_image, v_texCoord + onePixel * vec2(-1, -1)) * u_kernel[0] +
+        texture2D(u_image, v_texCoord + onePixel * vec2(0, -1)) * u_kernel[1] +
+        texture2D(u_image, v_texCoord + onePixel * vec2(1, -1)) * u_kernel[2] +
+        texture2D(u_image, v_texCoord + onePixel * vec2(-1, 0)) * u_kernel[3] +
+        texture2D(u_image, v_texCoord + onePixel * vec2(0, 0)) * u_kernel[4] +
+        texture2D(u_image, v_texCoord + onePixel * vec2(1, 0)) * u_kernel[5] +
+        texture2D(u_image, v_texCoord + onePixel * vec2(-1, 1)) * u_kernel[6] +
+        texture2D(u_image, v_texCoord + onePixel * vec2(0, 1)) * u_kernel[7] +
+        texture2D(u_image, v_texCoord + onePixel * vec2(1, 1)) * u_kernel[8];
+        gl_FragColor = vec4(colorSum.rgb, 1);
+    }
+</script>
+
+<script id="lut-shader" type="x-shader/x-fragment">
+    precision mediump float;
+    precision mediump int;
+
+    // our texture
+    uniform sampler2D u_markerDensity;
+    uniform lowp float u_lookupTable[65536];
+
+    uniform vec3 u_color;
+
+    // the texCoords passed in from the vertex shader.
+    varying vec2 v_texCoord;
+
+    void main() {
+
+        vec2 overlap = texture2D(u_markerDensity, v_texCoord);
+        uint count = uint(overlap.y * 255) + uint(overlap.x * 255) * 256;
+
+        float alpha = u_lookupTable[count];
+
+        gl_FragColor = vec4(u_color, alpha);
+    }
+</script>
+
+<script id="scaling-shader" type="x-shader/x-fragment">
+    precision mediump float;
+    precision mediump int;
+
+    // our texture
+    uniform sampler2D u_srcPointDensity;
+    uniform vec2 u_srcPointDensitySize;
+    uniform vec2 u_dstPointDensitySize;
+
+    // the texCoords passed in from the vertex shader.
+    varying vec2 v_texCoord;
+
+    void main() {
+        vec2 dstPixel = floor(v_texCoord * u_dstPointDensitySize);
+        ivec2 srcStart = ivec2(floor(dstPixel * u_srcPointDensitySize / u_dstPointDensitySize));
+        ivec2 srcEnd = ivec2(floor((dstPixel + 1) * u_srcPointDensitySize / u_dstPointDensitySize));
+
+        uint count = 0;
+        for(int x = srcStart.x; x < srcEnd.x; x++) {
+            for(int y = srcStart.y; y < srcEnd.y; y++) {
+                vec2 overlap = texture2D(u_image, vec2(x, y));
+                // TODO: this might overflow
+                count += uint(overlap.y * 255) + uint(overlap.x * 255) * 256;
+            }
+        }
+
+        gl_FragColor = vec2(floor(count / 256) / 255, mod(count, 256) / 255);
+    }
+</script>
+
+<script src="https://webglfundamentals.org/webgl/resources/jquery-1.7.1.min.js"></script>
+<script src="https://webglfundamentals.org/webgl/resources/jquery.tablednd_0_5.js"></script>
+<!--
+for most samples webgl-utils only provides shader compiling/linking and
+canvas resizing because why clutter the examples with code that's the same in every sample.
+See https://webglfundamentals.org/webgl/lessons/webgl-boilerplate.html
+and https://webglfundamentals.org/webgl/lessons/webgl-resizing-the-canvas.html
+for webgl-utils, m3, m4, and webgl-lessons-ui.
+-->
+<script src="webgl-utils.js"></script>
+
+<script src="script.js"></script>
+
+</body>
+</html>
+
