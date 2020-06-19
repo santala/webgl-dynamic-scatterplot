@@ -77,10 +77,13 @@ void main() {
 
             ivec2 dstPixel = ivec2(v_texCoord * u_dstSize);
             ivec2 srcPixelStart = ivec2(vec2(dstPixel) * scale);
-            ivec2 srcPixelEnd = ivec2(vec2(dstPixel + 1) * scale);
+            ivec2 srcPixelEnd = ivec2(floor(vec2(dstPixel + 1) * scale));
 
             vec2 startF = vec2(srcPixelStart) / u_srcSize;
             vec2 endF = vec2(srcPixelEnd) / u_srcSize;
+
+            vec2 startOffset = (v_texCoord - dstPixelSize / 2.) - startF;
+            vec2 endOffset = 1. - (endF - (v_texCoord + dstPixelSize / 2.));
 
             float x = startF.x;
             float y = startF.y;
@@ -97,6 +100,11 @@ void main() {
                     }
 
                     vec4 dataSample = texture2D(u_image, vec2(x, y));
+
+                    if (xSample == 0 && dataSample.x < startOffset.x) { continue; }
+                    if (ySample == 0 && dataSample.y < startOffset.y) { continue; }
+                    if (x + srcPixelSize.x >= endF.x && dataSample.x > endOffset.x) { continue; }
+                    if (y + srcPixelSize.y >= endF.y && dataSample.y > endOffset.y) { continue; }
 
                     count += (dataSample.z * 256. + dataSample.w) * 255.;
                     xOffset += dataSample.x;
