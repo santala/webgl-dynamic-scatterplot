@@ -45,6 +45,7 @@ void main() {
 <script id="fragment-shader-2d" type="x-shader/x-fragment">
 
     precision mediump float;
+    precision mediump int;
 
     // our texture
     uniform sampler2D u_image;
@@ -75,53 +76,49 @@ void main() {
 
             //np.round(np.arange(new_width + 1) * (old_width / new_width)).astype(np.int16)
 
-            ivec2 dstPixel = ivec2(v_texCoord * u_dstSize);
+            ivec2 dstPixel = ivec2(v_texCoord * (u_dstSize - 1.));
             ivec2 srcPixelStart = ivec2(vec2(dstPixel) * scale);
-            ivec2 srcPixelEnd = ivec2(floor(vec2(dstPixel + 1) * scale));
+            ivec2 srcPixelEnd = ivec2((vec2(dstPixel + 1) * scale));
 
-            vec2 startF = vec2(srcPixelStart) / u_srcSize;
-            vec2 endF = vec2(srcPixelEnd) / u_srcSize;
+            vec2 startF = vec2(srcPixelStart) / (u_srcSize - 1.);
+            vec2 endF = vec2(srcPixelEnd) / (u_srcSize - 1.);
 
             vec2 startOffset = (v_texCoord - dstPixelSize / 2.) - startF;
             vec2 endOffset = 1. - (endF - (v_texCoord + dstPixelSize / 2.));
 
             float x = startF.x;
             float y = startF.y;
-            int xSample = 0;
-            int ySample = 0;
+            int xSample = srcPixelStart.x;
+            int ySample = srcPixelStart.y;
 
             for (int i = 0; i < 9999; i++) {
-                if (x >= endF.x) {
+                if (ySample > srcPixelEnd.y) {
                     break;
                 }
-                for (int j = 0; j < 9999; j++) {
-                    if (y >= endF.y) {
-                        break;
-                    }
+                y = float(ySample) / (u_srcSize.y - 1.);
+                x = float(xSample) / (u_srcSize.x - 1.);
 
-                    vec4 dataSample = texture2D(u_image, vec2(x, y));
+                vec4 dataSample = texture2D(u_image, vec2(x, y));
 
-                    if (xSample == 0 && dataSample.x < startOffset.x) { continue; }
-                    if (ySample == 0 && dataSample.y < startOffset.y) { continue; }
-                    if (x + srcPixelSize.x >= endF.x && dataSample.x > endOffset.x) { continue; }
-                    if (y + srcPixelSize.y >= endF.y && dataSample.y > endOffset.y) { continue; }
+//                if (xSample == srcPixelStart.x && dataSample.x < startOffset.x) { continue; }
+//                if (ySample == srcPixelStart.y && dataSample.y < startOffset.y) { continue; }
+//                if (xSample == srcPixelEnd.x && dataSample.x >= endOffset.x) { continue; }
+//                if (ySample == srcPixelEnd.y && dataSample.y >= endOffset.y) { continue; }
 
-                    count += (dataSample.z * 256. + dataSample.w) * 255.;
-                    xOffset += dataSample.x;
-                    yOffset += dataSample.y;
+                count += (dataSample.z * 256. + dataSample.w) * 255.;
+                xOffset += dataSample.x;
+                yOffset += dataSample.y;
 
-                    ySample++;
-                    //y += srcPixelSize.y;
-                    y = startF.y + float(ySample) * srcPixelSize.y;
-                }
                 xSample++;
-                //x += srcPixelSize.x;
-                x = startF.x + float(xSample) * srcPixelSize.x;
+
+                if (xSample > srcPixelEnd.x) {
+                    xSample = srcPixelStart.x;
+                    ySample++;
+                }
             }
 
+
             gl_FragColor = vec4(xOffset / count, yOffset / count, floor(count / 256.) / 255.,  mod(count, 256.) / 255.);
-            //gl_FragColor = vec4(xOffset / count, yOffset / count, 0,  count / 255.);
-            //gl_FragColor = vec4(floor(count / 256.) / 255., mod(count, 256.) / 255., 0, 0);
 
         } else if (u_stage == 1) {
             // Apply marker
@@ -131,7 +128,7 @@ void main() {
             // Look up alpha
             vec4 dataSample = texture2D(u_image, v_texCoord);
             float overlap = (dataSample.z * 256. + dataSample.w) * 255.;
-            float alpha = .5;
+            float alpha = 1.;
             float opacity;
             if (overlap == 0.) {
                 opacity = 0.;

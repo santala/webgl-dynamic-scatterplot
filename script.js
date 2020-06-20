@@ -13,9 +13,9 @@ function main() {
         };
     } else {
 
-        fetch("./example-data/isabel_250k.csv").then(res => res.text()).then(csv => {
+        fetch("./example-data/out5d.csv").then(res => res.text()).then(csv => {
             console.log("Fetched CSV");
-            const densityMapSize = 2048;
+            const densityMapSize = 2000;
             const densityMap = Array(densityMapSize);
             for (let i = 0; i < densityMap.length; i++) {
                 densityMap[i] = Array(densityMapSize);
@@ -27,6 +27,8 @@ function main() {
             const lines = csv.split("\n");
 
             const data = [];
+
+            // TODO: add one pixel empty padding to the texture
 
             let xMin = Number.MAX_VALUE,
                 xMax = Number.MIN_VALUE,
@@ -68,26 +70,43 @@ function main() {
 
             for (let yInt = 0; yInt < densityMapSize; yInt++) {
                 for (let xInt = 0; xInt < densityMapSize; xInt++) {
-                    densityMap[yInt][xInt][0] = Math.floor(densityMap[yInt][xInt][0] / densityMap[yInt][xInt][2] * 255);
-                    densityMap[yInt][xInt][1] = Math.floor(densityMap[yInt][xInt][1] / densityMap[yInt][xInt][2] * 255);
-                    densityMap[yInt][xInt][3] = densityMap[yInt][xInt][2] % 256;
-                    densityMap[yInt][xInt][2] = Math.min(255, Math.floor(densityMap[yInt][xInt][2] / 256));
+                    if (true) {
+                        densityMap[yInt][xInt][0] = Math.floor(densityMap[yInt][xInt][0] / densityMap[yInt][xInt][2] * 255);
+                        densityMap[yInt][xInt][1] = Math.floor(densityMap[yInt][xInt][1] / densityMap[yInt][xInt][2] * 255);
+                        densityMap[yInt][xInt][3] = densityMap[yInt][xInt][2] % 256;
+                        densityMap[yInt][xInt][2] = Math.min(255, Math.floor(densityMap[yInt][xInt][2] / 256));
+                    } else {
+                        densityMap[yInt][xInt][0] = 127;
+                        densityMap[yInt][xInt][1] = 127;
+                        densityMap[yInt][xInt][3] = 255 * Math.min(1, densityMap[yInt][xInt][2]);
+                        densityMap[yInt][xInt][2] = 0;
+                    }
                 }
             }
 
-            const dataTexture = new Uint8Array(densityMap.flat().flat());
-
             console.log("Rendering");
-            render(dataTexture, densityMapSize);
-        });
-        if (false) {
-            const img = document.querySelector("#overlap");
-            img.onload = function() {
-                render(img);
-            };
-            render(img);
-        }
 
+            if (true) {
+                const dataTexture = new Uint8Array(densityMap.flat().flat());
+                render(dataTexture, densityMapSize);
+            } else {
+                const dataTexture = new Uint8ClampedArray(densityMap.flat().flat());
+                const canvas = document.querySelector("#canvas");
+
+                let width = canvas.clientWidth;
+                let height = canvas.clientHeight;
+                //width = 900; height = width;
+                canvas.width = width;
+                canvas.height = height;
+                const imageData = new ImageData(dataTexture, densityMapSize, densityMapSize);
+                const ctx = canvas.getContext("2d");
+                ctx.putImageData(imageData, 100, 100, 0, 0, densityMapSize, densityMapSize);
+                ctx.fillRect(0, 0, 100, 100);
+                console.log(canvas, imageData, ctx);
+            }
+
+
+        });
     }
 
 }
@@ -106,7 +125,9 @@ function render(dataTexture, textureSize) {
 
     let width = canvas.clientWidth;
     let height = canvas.clientHeight;
-    width = 1006; height = width;
+    width = 900; height = width;
+    canvas.width = width;
+    canvas.height = height;
 
     // setup GLSL program
     var program = webglUtils.createProgramFromScripts(gl, ["vertex-shader-2d", "fragment-shader-2d"]);
@@ -166,28 +187,6 @@ function render(dataTexture, textureSize) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, markerDensityFb);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, markerDensityTx, 0);
 
-    // create 2 textures and attach them to framebuffers.
-    // const textures = [];
-    // const framebuffers = [];
-    // for (var ii = 0; ii < 2; ++ii) {
-    //     var texture = createAndSetupTexture(gl);
-    //     textures.push(texture);
-    //
-    //     // make the texture the same size as the image
-    //     gl.texImage2D(
-    //         gl.TEXTURE_2D, 0, gl.RGBA, image.width, image.height, 0,
-    //         gl.RGBA, gl.UNSIGNED_BYTE, null);
-    //
-    //     // Create a framebuffer
-    //     var fbo = gl.createFramebuffer();
-    //     framebuffers.push(fbo);
-    //     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    //
-    //     // Attach a texture to it.
-    //     gl.framebufferTexture2D(
-    //         gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-    // }
-
     // lookup uniforms
     const stageLocation = gl.getUniformLocation(program, "u_stage");
     const srcSizeLocation = gl.getUniformLocation(program, "u_srcSize");
@@ -196,23 +195,7 @@ function render(dataTexture, textureSize) {
 
     var resolutionLocation = gl.getUniformLocation(program, "u_resolution");
     var textureSizeLocation = gl.getUniformLocation(program, "u_textureSize");
-    var kernelLocation = gl.getUniformLocation(program, "u_kernel[0]");
-    var kernelWeightLocation = gl.getUniformLocation(program, "u_kernelWeight");
     var flipYLocation = gl.getUniformLocation(program, "u_flipY");
-
-    // Define several convolution kernels
-    var kernels = {
-        normal: [
-            0, 0, 0,
-            0, 1, 0,
-            0, 0, 0
-        ],
-        test: [
-            0, 1, 0,
-            1, 1, 1,
-            0, 1, 0
-        ],
-    };
 
     var effects = [
         { name: "test", on: true },
@@ -244,13 +227,6 @@ function render(dataTexture, textureSize) {
 
     drawEffects();
 
-    function computeKernelWeight(kernel) {
-        var weight = kernel.reduce(function(prev, curr) {
-            return prev + curr;
-        });
-        return weight <= 0 ? 1 : weight;
-    }
-
     function drawEffects(name) {
         webglUtils.resizeCanvasToDisplaySize(gl.canvas);
 
@@ -268,13 +244,7 @@ function render(dataTexture, textureSize) {
         gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
 
         // Tell the position attribute how to get data out of positionBuffer (ARRAY_BUFFER)
-        var size = 2;          // 2 components per iteration
-        var type = gl.FLOAT;   // the data is 32bit floats
-        var normalize = false; // don't normalize the data
-        var stride = 0;        // 0 = move forward size * sizeof(type) each iteration to get the next position
-        var offset = 0;        // start at the beginning of the buffer
-        gl.vertexAttribPointer(
-            positionLocation, size, type, normalize, stride, offset);
+        gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
 
         // Turn on the texcoord attribute
         gl.enableVertexAttribArray(texcoordLocation);
@@ -283,13 +253,7 @@ function render(dataTexture, textureSize) {
         gl.bindBuffer(gl.ARRAY_BUFFER, texcoordBuffer);
 
         // Tell the texcoord attribute how to get data out of texcoordBuffer (ARRAY_BUFFER)
-        var size = 2;          // 2 components per iteration
-        var type = gl.FLOAT;   // the data is 32bit floats
-        var normalize = false; // don't normalize the data
-        var stride = 0;        // 0 = move forward size * sizeof(type) each iteration to get the next position
-        var offset = 0;        // start at the beginning of the buffer
-        gl.vertexAttribPointer(
-            texcoordLocation, size, type, normalize, stride, offset);
+        gl.vertexAttribPointer(texcoordLocation, 2, gl.FLOAT, false, 0, 0);
 
         // set the size of the image
         gl.uniform2f(textureSizeLocation, textureSize, textureSize);
@@ -299,8 +263,6 @@ function render(dataTexture, textureSize) {
 
         // don't y flip images while drawing to the textures
         gl.uniform1f(flipYLocation, 1);
-
-        // loop through each effect we want to apply.
 
         gl.uniform2f(srcSizeLocation, textureSize, textureSize);
         gl.uniform2f(dstSizeLocation, width, height);
