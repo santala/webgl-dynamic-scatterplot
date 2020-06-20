@@ -83,11 +83,15 @@ void main() {
             vec2 startF = vec2(srcPixelStart) / (u_srcSize - 1.);
             vec2 endF = vec2(srcPixelEnd) / (u_srcSize - 1.);
 
-            vec2 startOffset = (v_texCoord - dstPixelSize / 2.) - startF;
-            vec2 endOffset = 1. - (endF - (v_texCoord + dstPixelSize / 2.));
 
-            float x = startF.x;
-            float y = startF.y;
+            //startOffset = vec2(1., 1.);
+            //endOffset = vec2(.0, .0);
+
+            vec2 startOffset = (vec2(dstPixel) / (u_dstSize - 1.)) - startF;
+            vec2 endOffset = endF - (vec2(dstPixel + 1) / (u_dstSize - 1.));
+
+            float x;
+            float y;
             int xSample = srcPixelStart.x;
             int ySample = srcPixelStart.y;
 
@@ -95,19 +99,23 @@ void main() {
                 if (ySample > srcPixelEnd.y) {
                     break;
                 }
-                y = float(ySample) / (u_srcSize.y - 1.);
-                x = float(xSample) / (u_srcSize.x - 1.);
+                x = (float(xSample) + .5) / (u_srcSize.x - 1.);
+                y = (float(ySample) + .5) / (u_srcSize.y - 1.);
 
                 vec4 dataSample = texture2D(u_image, vec2(x, y));
 
-//                if (xSample == srcPixelStart.x && dataSample.x < startOffset.x) { continue; }
-//                if (ySample == srcPixelStart.y && dataSample.y < startOffset.y) { continue; }
-//                if (xSample == srcPixelEnd.x && dataSample.x >= endOffset.x) { continue; }
-//                if (ySample == srcPixelEnd.y && dataSample.y >= endOffset.y) { continue; }
+                if (
+                    true &&
+                    (xSample > srcPixelStart.x || dataSample.x >= startOffset.x) &&
+                    (ySample > srcPixelStart.y || dataSample.y >= startOffset.y) &&
+                    (xSample < srcPixelEnd.x || dataSample.x < endOffset.x) &&
+                    (ySample < srcPixelEnd.y || dataSample.y < endOffset.y)
+                ) {
+                    count += (dataSample.z * 256. + dataSample.w) * 255.;
+                    xOffset += dataSample.x;
+                    yOffset += dataSample.y;
+                }
 
-                count += (dataSample.z * 256. + dataSample.w) * 255.;
-                xOffset += dataSample.x;
-                yOffset += dataSample.y;
 
                 xSample++;
 
@@ -128,7 +136,7 @@ void main() {
             // Look up alpha
             vec4 dataSample = texture2D(u_image, v_texCoord);
             float overlap = (dataSample.z * 256. + dataSample.w) * 255.;
-            float alpha = 1.;
+            float alpha = .25;
             float opacity;
             if (overlap == 0.) {
                 opacity = 0.;
