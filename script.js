@@ -191,10 +191,12 @@ function render(dataTexture, textureSize) {
     const stageLocation = gl.getUniformLocation(program, "u_stage");
     const srcSizeLocation = gl.getUniformLocation(program, "u_srcSize");
     const dstSizeLocation = gl.getUniformLocation(program, "u_dstSize");
+    const markerLocation = gl.getUniformLocation(program, "u_marker");
+
+
 
 
     var resolutionLocation = gl.getUniformLocation(program, "u_resolution");
-    var textureSizeLocation = gl.getUniformLocation(program, "u_textureSize");
     var flipYLocation = gl.getUniformLocation(program, "u_flipY");
 
     var effects = [
@@ -255,8 +257,6 @@ function render(dataTexture, textureSize) {
         // Tell the texcoord attribute how to get data out of texcoordBuffer (ARRAY_BUFFER)
         gl.vertexAttribPointer(texcoordLocation, 2, gl.FLOAT, false, 0, 0);
 
-        // set the size of the image
-        gl.uniform2f(textureSizeLocation, textureSize, textureSize);
 
         // start with the original image
         gl.bindTexture(gl.TEXTURE_2D, originalPointDensity);
@@ -272,6 +272,12 @@ function render(dataTexture, textureSize) {
         gl.bindTexture(gl.TEXTURE_2D, scaledPointDensityTx);
 
         gl.uniform2i(srcSizeLocation, width, height);
+
+        gl.uniform1fv(markerLocation, [
+            0, 1, 0,
+            1, 1, 1,
+            0, 1, 0
+        ]);
 
         gl.uniform1i(stageLocation, 1);
         setFramebuffer(markerDensityFb, width, height);

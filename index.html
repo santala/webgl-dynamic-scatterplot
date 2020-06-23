@@ -49,9 +49,11 @@ void main() {
 
     // our texture
     uniform sampler2D u_image;
-    uniform vec2 u_textureSize;
-    uniform float u_kernel[9];
-    uniform float u_kernelWeight;
+
+    const int marker_w = 3;
+    const int marker_len = marker_w * marker_w;
+
+    uniform float u_marker[marker_len];
 
     uniform int u_stage;
 
@@ -61,20 +63,29 @@ void main() {
     // the texCoords passed in from the vertex shader.
     varying vec2 v_texCoord;
 
+
+    float channels_to_count(vec2 channels) {
+        return (channels.x * 256. + channels.y) * 255.;
+    }
+
+    vec2 count_to_channels(float count) {
+        return vec2(floor(count / 256.) / 255.,  mod(count, 256.) / 255.);
+    }
+
     void main() {
+        vec2 dstPixelSize = 1. / u_dstSize;
+
         if (u_stage == 0) {
             // Downscale density map
 
             vec2 scale = u_srcSize / u_dstSize;
 
             vec2 srcPixelSize = 1. / u_srcSize;
-            vec2 dstPixelSize = 1. / u_dstSize;
+
 
             float count = 0.;
-            float xOffset = 0.;
-            float yOffset = 0.;
-
-            //np.round(np.arange(new_width + 1) * (old_width / new_width)).astype(np.int16)
+            vec2 offset = vec2(0., 0.);
+            //float yOffset = 0.;
 
             ivec2 dstPixel = ivec2(v_texCoord * (u_dstSize - 1.));
             ivec2 srcPixelStart = ivec2(vec2(dstPixel) * scale);
@@ -82,10 +93,6 @@ void main() {
 
             vec2 startF = vec2(srcPixelStart) / (u_srcSize - 1.);
             vec2 endF = vec2(srcPixelEnd) / (u_srcSize - 1.);
-
-
-            //startOffset = vec2(1., 1.);
-            //endOffset = vec2(.0, .0);
 
             vec2 startOffset = (vec2(dstPixel) / (u_dstSize - 1.)) - startF;
             vec2 endOffset = endF - (vec2(dstPixel + 1) / (u_dstSize - 1.));
@@ -111,14 +118,14 @@ void main() {
                     (xSample < srcPixelEnd.x || dataSample.x < endOffset.x) &&
                     (ySample < srcPixelEnd.y || dataSample.y < endOffset.y)
                 ) {
-                    count += (dataSample.z * 256. + dataSample.w) * 255.;
-                    xOffset += dataSample.x;
-                    yOffset += dataSample.y;
+                    count += channels_to_count(dataSample.zw);
+                    //xOffset += dataSample.x;
+                    //yOffset += dataSample.y;
+                    offset += dataSample.xy;
                 }
 
 
                 xSample++;
-
                 if (xSample > srcPixelEnd.x) {
                     xSample = srcPixelStart.x;
                     ySample++;
@@ -126,16 +133,33 @@ void main() {
             }
 
 
-            gl_FragColor = vec4(xOffset / count, yOffset / count, floor(count / 256.) / 255.,  mod(count, 256.) / 255.);
+            gl_FragColor = vec4(offset / count, count_to_channels(count));
 
         } else if (u_stage == 1) {
             // Apply marker
 
-            gl_FragColor = vec4(texture2D(u_image, v_texCoord));//vec4(texture2D(u_image, v_texCoord).r, 0, 0, 1);
+            float count = 0.;
+
+            int x = 0;
+            int y = 0;
+
+            for (int i = 0; i < marker_len; i++) {
+                vec4 dataSample = texture2D(u_image, v_texCoord + dstPixelSize * vec2(x, y));
+                count += u_marker[i] * channels_to_count(dataSample.zw);
+
+                x++;
+                if (x >= marker_w) {
+                    x = 0;
+                    y++;
+                }
+            }
+
+            //gl_FragColor = vec4(texture2D(u_image, v_texCoord));
+            gl_FragColor = vec4(0, 0, count_to_channels(count));
         } else if (u_stage == 2) {
             // Look up alpha
             vec4 dataSample = texture2D(u_image, v_texCoord);
-            float overlap = (dataSample.z * 256. + dataSample.w) * 255.;
+            float overlap = channels_to_count(dataSample.zw);
             float alpha = .25;
             float opacity;
             if (overlap == 0.) {
@@ -144,7 +168,7 @@ void main() {
                 opacity = 1. - pow(1. - alpha, overlap);
             }
 
-            gl_FragColor = vec4(0, 0, 0, opacity);//vec4(texture2D(u_image, v_texCoord).r, 0, 0, 1);
+            gl_FragColor = vec4(0, 0, 0, opacity);
         } else {
             // Unknown stage, return red.
             gl_FragColor = vec4(1, 0, 0, 1);
@@ -177,60 +201,6 @@ void main() {
         texture2D(u_image, v_texCoord + onePixel * vec2(0, 1)) * u_kernel[7] +
         texture2D(u_image, v_texCoord + onePixel * vec2(1, 1)) * u_kernel[8];
         gl_FragColor = vec4(colorSum.rgb, 1);
-    }
-</script>
-
-<script id="lut-shader" type="x-shader/x-fragment">
-    precision mediump float;
-    precision mediump int;
-
-    // our texture
-    uniform sampler2D u_markerDensity;
-    uniform lowp float u_lookupTable[65536];
-
-    uniform vec3 u_color;
-
-    // the texCoords passed in from the vertex shader.
-    varying vec2 v_texCoord;
-
-    void main() {
-
-        vec2 overlap = texture2D(u_markerDensity, v_texCoord);
-        uint count = uint(overlap.y * 255) + uint(overlap.x * 255) * 256;
-
-        float alpha = u_lookupTable[count];
-
-        gl_FragColor = vec4(u_color, alpha);
-    }
-</script>
-
-<script id="scaling-shader" type="x-shader/x-fragment">
-    precision mediump float;
-    precision mediump int;
-
-    // our texture
-    uniform sampler2D u_srcPointDensity;
-    uniform vec2 u_srcPointDensitySize;
-    uniform vec2 u_dstPointDensitySize;
-
-    // the texCoords passed in from the vertex shader.
-    varying vec2 v_texCoord;
-
-    void main() {
-        vec2 dstPixel = floor(v_texCoord * u_dstPointDensitySize);
-        ivec2 srcStart = ivec2(floor(dstPixel * u_srcPointDensitySize / u_dstPointDensitySize));
-        ivec2 srcEnd = ivec2(floor((dstPixel + 1) * u_srcPointDensitySize / u_dstPointDensitySize));
-
-        uint count = 0;
-        for(int x = srcStart.x; x < srcEnd.x; x++) {
-            for(int y = srcStart.y; y < srcEnd.y; y++) {
-                vec2 overlap = texture2D(u_image, vec2(x, y));
-                // TODO: this might overflow
-                count += uint(overlap.y * 255) + uint(overlap.x * 255) * 256;
-            }
-        }
-
-        gl_FragColor = vec2(floor(count / 256) / 255, mod(count, 256) / 255);
     }
 </script>
 
