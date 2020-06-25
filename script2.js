@@ -63,6 +63,9 @@ const fragmentShaderSource = `
     }
 `;
 
+let vertexShader = null;
+let fragmentShader = null;
+
 
 function compileShader(gl, shaderType, source) {
     const shader = gl.createShader(shaderType);
@@ -96,17 +99,14 @@ function createProgram(gl, shaders) {
 }
 
 
-function renderScatterplot(dataUint16) {
-    const canvas = document.getElementById('canvas');
-    canvas.width = canvas.clientWidth;
-    canvas.height = canvas.clientHeight;
+function renderScatterplot(canvas, dataUint16) {
     const gl = canvas.getContext('webgl');
     if (!gl) {
         return;
     }
 
-    const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
-    const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+    vertexShader = vertexShader || compileShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+    fragmentShader = fragmentShader || compileShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
 
     const program = createProgram(gl, [vertexShader, fragmentShader]);
 
@@ -152,6 +152,29 @@ function renderScatterplot(dataUint16) {
 }
 
 
+function startRendering(dataUint16) {
+    const canvas = document.getElementById('canvas');
+    let firstTime = true;
+
+    function renderLoop() {
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
+
+        if (canvas.width !== width || canvas.height !== height || firstTime) {
+            firstTime = false;
+            canvas.width = width;
+            canvas.height = height;
+
+            renderScatterplot(canvas, dataUint16);
+        }
+
+        requestAnimationFrame(renderLoop)
+    }
+
+    renderLoop();
+}
+
+
 (() => {
 
     fetch("./example-data/out5d.csv").then(res => res.text()).then(csv => {
@@ -194,7 +217,7 @@ function renderScatterplot(dataUint16) {
 
         console.log(data.length, dataUint16.length / 3);
 
-        renderScatterplot(dataUint16);
+        startRendering(dataUint16);
     });
 
 })();
