@@ -50,16 +50,12 @@ const fragmentShaderSource = `
             discard;
         }
         
-        float opacity;
-        vec4 tex = vec4(0);
-
         if (sqrt(pow(gl_PointCoord.x - .5, 2.) + pow(gl_PointCoord.y - .5, 2.)) > .5) {
-            opacity = 0.;
-        } else {
-            opacity = texture2D(u_lookupTable, vec2((v_pointCount + .5) / u_lookupTexWidth, .5)).a;
+            discard;
         }
+        float opacity = texture2D(u_lookupTable, vec2((v_pointCount + .5) / u_lookupTexWidth, .5)).a;
         
-        gl_FragColor = vec4(u_color, 1) * opacity;
+        gl_FragColor = vec4(u_color * opacity, opacity);
     }
 `;
 
