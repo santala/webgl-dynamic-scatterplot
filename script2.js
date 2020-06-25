@@ -273,7 +273,7 @@ function startRendering(dataUint16) {
     const points = [];
     const groupOffsets = [];
 
-    fetch("./example-data/out5d.csv").then(res => res.text()).then(csv => {
+    fetch("./example-data/isabel_250k.csv").then(res => res.text()).then(csv => {
         console.log('Parsing CSV...');
 
         const lines = csv.split("\n");
@@ -304,6 +304,8 @@ function startRendering(dataUint16) {
 
         const maxVal = 2**16 - 1;
 
+        console.time('Preparing data');
+
         for (let i = 0; i < data.length; i++) {
             const [x, y] = data[i];
             const xNorm = (x - xMin) / xRange;
@@ -311,23 +313,31 @@ function startRendering(dataUint16) {
             const xScaled = xNorm * maxVal;
             const yScaled = yNorm * maxVal;
 
-            const groupRow = Math.min(maxResolution - 1, Math.floor(xNorm * maxResolution));
-            const groupCol = Math.min(maxResolution - 1, Math.floor(yNorm * maxResolution));
-            const groupPixel = groupRow * maxResolution + groupCol;
+            const groupRow = ~~(xNorm * maxResolution); // cast to int
+            const groupCol = ~~(yNorm * maxResolution); // cast to int
+            const groupIdx = groupRow * maxResolution + groupCol;
 
-            const groupOffset = 3 * groupOffsets.indexOf(groupPixel);
-            if (groupOffset >= 0) {
-                const existingGroupX = points[groupOffset + 0];
-                const existingGroupY = points[groupOffset + 1];
-                const existingGroupN = points[groupOffset + 2];
-                points[groupOffset + 0] = Math.round((existingGroupX * existingGroupN + xScaled) / (existingGroupN + 1));
-                points[groupOffset + 1] = Math.round((existingGroupY * existingGroupN + yScaled) / (existingGroupN + 1));
+            const groupOffset = groupOffsets[groupIdx];
+            if (!!groupOffset) {
+                points[groupOffset] += xScaled;
+                points[groupOffset + 1] += yScaled;
                 points[groupOffset + 2]++;
             } else {
-                points.push(Math.round(xScaled), Math.round(yScaled), 1);
-                groupOffsets.push(groupPixel);
+                groupOffsets[groupIdx] = points.length;
+                points[points.length] = xScaled;
+                points[points.length] = yScaled;
+                points[points.length] = 1;
             }
         }
+
+        for (let i = 0; i < points.length; i += 3) {
+            const n = points[i + 2];
+            points[i] /= n;
+            points[i + 1] /= n;
+        }
+
+        console.timeEnd('Preparing data');
+
 
         console.log('Rendering...');
 
