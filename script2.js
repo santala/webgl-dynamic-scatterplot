@@ -37,6 +37,7 @@ const fragmentShaderSource = `
 
     uniform sampler2D u_marker;
     
+    uniform vec3 u_color;
     uniform float u_alpha;
     uniform float u_pointSize;
 
@@ -59,12 +60,9 @@ const fragmentShaderSource = `
             }
         }
         
-        gl_FragColor = vec4(1, 0, 0, 1) * opacity;
+        gl_FragColor = vec4(u_color, 1) * opacity;
     }
 `;
-
-let vertexShader = null;
-let fragmentShader = null;
 
 
 function compileShader(gl, shaderType, source) {
@@ -99,8 +97,33 @@ function createProgram(gl, shaders) {
 }
 
 
-function renderScatterplot(canvas, dataUint16) {
-    const gl = canvas.getContext('webgl');
+let vertexShader = null;
+let fragmentShader = null;
+let program = null;
+
+
+const alphaInput = document.getElementById('alpha');
+const markerSizeInput = document.getElementById('marker-size');
+const colorInput = document.getElementById('color');
+
+const getAlpha = () => parseFloat(alphaInput.value);
+const getMarkerSize = () => parseFloat(markerSizeInput.value);
+const getColor = () => colorInput.value;
+
+
+
+let width = -1;
+let height = -1;
+let alpha = getAlpha();
+let markerSize = getMarkerSize();
+let colorHex = getColor();
+
+function hex2rgb(hex) {
+    const hexValues = (/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex) || [null, "00", "00", "00"]).slice(1);
+    return hexValues.map(v => (parseInt(v, 16) || 0) / 256);
+}
+
+function renderScatterPlot(gl, canvas, dataUint16) {
     if (!gl) {
         return;
     }
@@ -108,13 +131,14 @@ function renderScatterplot(canvas, dataUint16) {
     vertexShader = vertexShader || compileShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
     fragmentShader = fragmentShader || compileShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
 
-    const program = createProgram(gl, [vertexShader, fragmentShader]);
+    program = program || createProgram(gl, [vertexShader, fragmentShader]);
 
     const positionLocation = gl.getAttribLocation(program, "a_position");
     const maxPositionLocation = gl.getUniformLocation(program, "u_maxPosition");
     const resolutionLocation = gl.getUniformLocation(program, "u_resolution");
     const pointSizeLocation = gl.getUniformLocation(program, "u_pointSize");
     const alphaLocation = gl.getUniformLocation(program, "u_alpha");
+    const colorLocation = gl.getUniformLocation(program, "u_color");
 
     const positionBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
@@ -141,10 +165,11 @@ function renderScatterplot(canvas, dataUint16) {
     // Tell the position attribute how to get data out of positionBuffer (ARRAY_BUFFER)
     gl.vertexAttribPointer(positionLocation, 3, gl.UNSIGNED_SHORT, false, 0, 0);
 
-    gl.uniform1f(pointSizeLocation, 50);
-    gl.uniform1f(alphaLocation, .5);
+    gl.uniform1f(pointSizeLocation, getMarkerSize());
+    gl.uniform1f(alphaLocation, getAlpha());
     gl.uniform1f(maxPositionLocation, Math.pow(2, 16) - 1);
     gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
+    gl.uniform3f(colorLocation, ...hex2rgb(colorHex));
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, canvas.width, canvas.height);
@@ -153,23 +178,47 @@ function renderScatterplot(canvas, dataUint16) {
 
 
 function startRendering(dataUint16) {
+
+    // TODO: Handle lost context properly
+    // https://www.khronos.org/webgl/wiki/HandlingContextLost
+
     const canvas = document.getElementById('canvas');
+    const gl = canvas.getContext('webgl');
     let firstTime = true;
+    let frameRequestId;
 
     function renderLoop() {
-        const width = canvas.clientWidth;
-        const height = canvas.clientHeight;
 
-        if (canvas.width !== width || canvas.height !== height || firstTime) {
+        if (width !== canvas.width
+            || height !== canvas.height
+            || alpha !== getAlpha()
+            || markerSize !== getMarkerSize()
+            || colorHex !== getColor()) {
             firstTime = false;
+            width = canvas.clientWidth;
+            height = canvas.clientHeight;
             canvas.width = width;
             canvas.height = height;
+            markerSize = getMarkerSize();
+            colorHex = getColor();
 
-            renderScatterplot(canvas, dataUint16);
+            console.log(colorHex);
+
+            frameRequestId = renderScatterPlot(gl, canvas, dataUint16);
         }
 
         requestAnimationFrame(renderLoop)
     }
+
+    canvas.addEventListener('webglcontextlost', (e) => {
+        console.log(e);
+        cancelAnimationFrame(frameRequestId);
+    });
+
+    canvas.addEventListener('webglcontextrestored', (e) => {
+        console.log(e);
+        renderLoop();
+    });
 
     renderLoop();
 }
