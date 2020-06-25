@@ -35,12 +35,13 @@ const fragmentShaderSource = `
     in vec2 gl_PointCoord;
     */
 
-    uniform sampler2D u_marker;
+    uniform sampler2D u_lookupTable;
     
     uniform vec3 u_color;
     uniform float u_alpha;
+    uniform float u_lookupTexWidth;
     uniform float u_pointSize;
-
+    
     // Overlap passed in from the vertex shader
     varying float v_pointCount;
     
@@ -49,20 +50,46 @@ const fragmentShaderSource = `
         //gl_FragColor = vec4(1, 0, 0, 1);
         //return;
         float opacity;
+        vec4 tex = vec4(0);
 
         if (sqrt(pow(gl_PointCoord.x - .5, 2.) + pow(gl_PointCoord.y - .5, 2.)) > .5) {
             opacity = 0.;
         } else {
-            if (v_pointCount == 0.) {
-                opacity = 0.;
-            } else {
-                opacity = 1. - pow(1. - u_alpha, v_pointCount);
-            }
+            //opacity = float(u_lookupTable[int(v_pointCount)]) / 255.;
+            tex = texture2D(u_lookupTable, vec2(255. / u_lookupTexWidth + .5, .5));
+            opacity = texture2D(u_lookupTable, vec2(v_pointCount / u_lookupTexWidth, .5)).a;
+//            if (v_pointCount == 0.) {
+//                opacity = 0.;
+//            } else {
+//                opacity = 1. - pow(1. - u_alpha, v_pointCount);
+//            }
         }
         
         gl_FragColor = vec4(u_color, 1) * opacity;
     }
 `;
+
+
+let lookupTable;
+
+function computeLookupTable(lookupTable, alpha) {
+    if (alpha === 0) {
+        lookupTable.fill(0);
+        return;
+    }
+    lookupTable[0] = 0;
+    const transparency =  1 - alpha;
+    let accumulatedTransparency = 1;
+    for (let i = 1; i < lookupTable.length; i++) {
+        accumulatedTransparency *= transparency;
+        const opacity = Math.round(255 - 255 * accumulatedTransparency);
+        if (opacity === 255) {
+            lookupTable.fill(255, i);
+            break;
+        }
+        lookupTable[i] = opacity;
+    }
+}
 
 
 function compileShader(gl, shaderType, source) {
@@ -117,7 +144,7 @@ markerSizeInput.setAttribute('min', pixelRatio);
 const getWidth = () => canvas.clientWidth * pixelRatio;
 const getHeight = () => canvas.clientHeight * pixelRatio;
 const getAlpha = () => parseFloat(alphaInput.value);
-const getMarkerSize = () => parseFloat(markerSizeInput.value);
+const getMarkerSize = () => parseInt(markerSizeInput.value);
 const getColor = () => colorInput.value;
 
 
@@ -147,6 +174,7 @@ function renderScatterPlot(gl, canvas, dataUint16) {
     const maxPositionLocation = gl.getUniformLocation(program, "u_maxPosition");
     const resolutionLocation = gl.getUniformLocation(program, "u_resolution");
     const pointSizeLocation = gl.getUniformLocation(program, "u_pointSize");
+    const lookupTextureWidthLocation = gl.getUniformLocation(program, "u_lookupTexWidth");
     const alphaLocation = gl.getUniformLocation(program, "u_alpha");
     const colorLocation = gl.getUniformLocation(program, "u_color");
 
@@ -154,7 +182,21 @@ function renderScatterPlot(gl, canvas, dataUint16) {
     gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, dataUint16, gl.DYNAMIC_DRAW);
 
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); // For data textures where row width is not a multipel of 4
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); // For data textures where row width is not a multiple of 4
+
+
+    const lookupTableTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, lookupTableTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+    const lookupTextureWidth = Math.floor(Math.min(2**16 - 1, gl.getParameter(gl.MAX_TEXTURE_SIZE)));
+    lookupTable = lookupTable || new Uint8Array(lookupTextureWidth);
+    computeLookupTable(lookupTable, alpha);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.ALPHA, lookupTextureWidth, 1, 0, gl.ALPHA, gl.UNSIGNED_BYTE, lookupTable);
+
 
 
     // Clear the canvas
@@ -166,6 +208,9 @@ function renderScatterPlot(gl, canvas, dataUint16) {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
+    gl.uniform1f(lookupTextureWidthLocation, lookupTextureWidth);
+
+
     // Turn on the position attribute
     gl.enableVertexAttribArray(positionLocation);
 
@@ -176,7 +221,7 @@ function renderScatterPlot(gl, canvas, dataUint16) {
     gl.vertexAttribPointer(positionLocation, 3, gl.UNSIGNED_SHORT, false, 0, 0);
 
     gl.uniform1f(pointSizeLocation, getMarkerSize());
-    gl.uniform1f(alphaLocation, getAlpha());
+    gl.uniform1i(alphaLocation, getAlpha());
     gl.uniform1f(maxPositionLocation,2**16 - 1);
     gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
     gl.uniform3f(colorLocation, ...hex2rgb(colorHex));
