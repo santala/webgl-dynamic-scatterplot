@@ -46,23 +46,17 @@ const fragmentShaderSource = `
     varying float v_pointCount;
     
     void main() {
-
-        //gl_FragColor = vec4(1, 0, 0, 1);
-        //return;
+        if (v_pointCount == 0.) {
+            discard;
+        }
+        
         float opacity;
         vec4 tex = vec4(0);
 
         if (sqrt(pow(gl_PointCoord.x - .5, 2.) + pow(gl_PointCoord.y - .5, 2.)) > .5) {
             opacity = 0.;
         } else {
-            //opacity = float(u_lookupTable[int(v_pointCount)]) / 255.;
-            tex = texture2D(u_lookupTable, vec2(255. / u_lookupTexWidth + .5, .5));
-            opacity = texture2D(u_lookupTable, vec2(v_pointCount / u_lookupTexWidth, .5)).a;
-//            if (v_pointCount == 0.) {
-//                opacity = 0.;
-//            } else {
-//                opacity = 1. - pow(1. - u_alpha, v_pointCount);
-//            }
+            opacity = texture2D(u_lookupTable, vec2((v_pointCount + .5) / u_lookupTexWidth, .5)).a;
         }
         
         gl_FragColor = vec4(u_color, 1) * opacity;
@@ -124,10 +118,10 @@ function createProgram(gl, shaders) {
 }
 
 const pixelRatio = window.devicePixelRatio || 1;
-const screenWidth = window.screen.width * pixelRatio;
-const screenHeight = window.screen.width * pixelRatio;
+const actualScreenWidth = window.screen.width * pixelRatio;
+const actualScreenHeight = window.screen.width * pixelRatio;
 
-const maxResolution = Math.max(screenWidth, screenHeight);
+const maxResolution = Math.max(window.screen.width, window.screen.height);
 
 let vertexShader = null;
 let fragmentShader = null;
@@ -282,7 +276,7 @@ function startRendering(dataUint16) {
 
     const points = new Uint16Array(3 * maxResolution**2).fill(0);
 
-    fetch("./example-data/out5d.csv").then(res => res.text()).then(csv => {
+    fetch("./example-data/isabel_250k.csv").then(res => res.text()).then(csv => {
         const lines = csv.split("\n");
 
         const data = [];
@@ -344,7 +338,6 @@ function startRendering(dataUint16) {
 
         console.log(data.length, dataUint16.length / 3);
         console.log(points.length, points.length / 3, maxResolution**2);
-        //console.log(points.filter(e => e > 0));
 
         startRendering(points);
     });
