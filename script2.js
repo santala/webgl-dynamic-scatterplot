@@ -270,18 +270,12 @@ function startRendering(dataUint16) {
 
 (() => {
 
-    const points = new Uint16Array(3 * maxResolution**2).fill(0);
+    const points = [];
+    const groupOffsets = [];
 
-    const pointsAlt = new Array(maxResolution);
-    for (let i = 0; i < maxResolution; i++) {
-        pointsAlt[i] = new Array(maxResolution);
-        for (let j = 0; j < maxResolution; j++) {
-            pointsAlt[i][j] = [0, 0, 0];
-        }
-    }
-    console.log(pointsAlt.flat().flat())
+    fetch("./example-data/out5d.csv").then(res => res.text()).then(csv => {
+        console.log('Parsing CSV...');
 
-    fetch("./example-data/isabel_250k.csv").then(res => res.text()).then(csv => {
         const lines = csv.split("\n");
 
         const data = [];
@@ -310,8 +304,6 @@ function startRendering(dataUint16) {
 
         const maxVal = 2**16 - 1;
 
-        const indices = [];
-
         for (let i = 0; i < data.length; i++) {
             const [x, y] = data[i];
             const xNorm = (x - xMin) / xRange;
@@ -321,36 +313,25 @@ function startRendering(dataUint16) {
 
             const groupRow = Math.min(maxResolution - 1, Math.floor(xNorm * maxResolution));
             const groupCol = Math.min(maxResolution - 1, Math.floor(yNorm * maxResolution));
-            const groupIdx = groupRow * maxResolution + groupCol;
-            const groupOffset = 3 * groupIdx;
-            const pointGroupXIdx = groupOffset;
-            const pointGroupYIdx = groupOffset + 1;
-            const pointGroupNIdx = groupOffset + 2;
+            const groupPixel = groupRow * maxResolution + groupCol;
 
-            const oldGroupX = points[pointGroupXIdx];
-            const oldGroupY = points[pointGroupYIdx];
-            const oldGroupN = points[pointGroupNIdx];
-            points[pointGroupXIdx] = Math.round((oldGroupX * oldGroupN + xScaled) / (oldGroupN + 1));
-            points[pointGroupYIdx] = Math.round((oldGroupY * oldGroupN + yScaled) / (oldGroupN + 1));
-            points[pointGroupNIdx]++;
-
-            indices.push(groupIdx);
-
-            pointsAlt[groupRow][groupCol] = points.slice(pointGroupXIdx, pointGroupXIdx + 3);
-        }
-
-        const test = [];
-        for (let i = 0; i < maxResolution; i++) {
-            for (let j = 0; j < maxResolution; j++) {
-                if (pointsAlt[i][j][2] > 0) {
-                    for (let k = 0; k < 3; k++) {
-                        test.push(pointsAlt[i][j][k]);
-                    }
-                }
+            const groupOffset = 3 * groupOffsets.indexOf(groupPixel);
+            if (groupOffset >= 0) {
+                const existingGroupX = points[groupOffset + 0];
+                const existingGroupY = points[groupOffset + 1];
+                const existingGroupN = points[groupOffset + 2];
+                points[groupOffset + 0] = Math.round((existingGroupX * existingGroupN + xScaled) / (existingGroupN + 1));
+                points[groupOffset + 1] = Math.round((existingGroupY * existingGroupN + yScaled) / (existingGroupN + 1));
+                points[groupOffset + 2]++;
+            } else {
+                points.push(Math.round(xScaled), Math.round(yScaled), 1);
+                groupOffsets.push(groupPixel);
             }
         }
 
-        startRendering(new Uint16Array(test));
+        console.log('Rendering...');
+
+        startRendering(new Uint16Array(points));
     });
 
 })();
