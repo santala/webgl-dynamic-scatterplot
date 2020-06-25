@@ -101,11 +101,16 @@ let vertexShader = null;
 let fragmentShader = null;
 let program = null;
 
+const canvas = document.getElementById('canvas');
 
 const alphaInput = document.getElementById('alpha');
 const markerSizeInput = document.getElementById('marker-size');
 const colorInput = document.getElementById('color');
 
+markerSizeInput.setAttribute('min', window.devicePixelRatio);
+
+const getWidth = () => canvas.clientWidth * window.devicePixelRatio;
+const getHeight = () => canvas.clientHeight * window.devicePixelRatio;
 const getAlpha = () => parseFloat(alphaInput.value);
 const getMarkerSize = () => parseFloat(markerSizeInput.value);
 const getColor = () => colorInput.value;
@@ -182,21 +187,20 @@ function startRendering(dataUint16) {
     // TODO: Handle lost context properly
     // https://www.khronos.org/webgl/wiki/HandlingContextLost
 
-    const canvas = document.getElementById('canvas');
     const gl = canvas.getContext('webgl');
     let firstTime = true;
     let frameRequestId;
 
     function renderLoop() {
 
-        if (width !== canvas.width
-            || height !== canvas.height
+        if (width !== getWidth()
+            || height !== getHeight()
             || alpha !== getAlpha()
             || markerSize !== getMarkerSize()
             || colorHex !== getColor()) {
             firstTime = false;
-            width = canvas.clientWidth;
-            height = canvas.clientHeight;
+            width = getWidth();
+            height = getHeight();
             canvas.width = width;
             canvas.height = height;
             markerSize = getMarkerSize();
