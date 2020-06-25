@@ -272,6 +272,15 @@ function startRendering(dataUint16) {
 
     const points = new Uint16Array(3 * maxResolution**2).fill(0);
 
+    const pointsAlt = new Array(maxResolution);
+    for (let i = 0; i < maxResolution; i++) {
+        pointsAlt[i] = new Array(maxResolution);
+        for (let j = 0; j < maxResolution; j++) {
+            pointsAlt[i][j] = [0, 0, 0];
+        }
+    }
+    console.log(pointsAlt.flat().flat())
+
     fetch("./example-data/isabel_250k.csv").then(res => res.text()).then(csv => {
         const lines = csv.split("\n");
 
@@ -301,6 +310,7 @@ function startRendering(dataUint16) {
 
         const maxVal = 2**16 - 1;
 
+        const indices = [];
 
         for (let i = 0; i < data.length; i++) {
             const [x, y] = data[i];
@@ -311,7 +321,8 @@ function startRendering(dataUint16) {
 
             const groupRow = Math.min(maxResolution - 1, Math.floor(xNorm * maxResolution));
             const groupCol = Math.min(maxResolution - 1, Math.floor(yNorm * maxResolution));
-            const groupOffset = 3 * (groupRow * maxResolution + groupCol);
+            const groupIdx = groupRow * maxResolution + groupCol;
+            const groupOffset = 3 * groupIdx;
             const pointGroupXIdx = groupOffset;
             const pointGroupYIdx = groupOffset + 1;
             const pointGroupNIdx = groupOffset + 2;
@@ -323,19 +334,23 @@ function startRendering(dataUint16) {
             points[pointGroupYIdx] = Math.round((oldGroupY * oldGroupN + yScaled) / (oldGroupN + 1));
             points[pointGroupNIdx]++;
 
-            data[i][0] = Math.round((data[i][0] - xMin) / xRange * maxVal);
-            data[i][1] = Math.round((data[i][1] - yMin) / yRange * maxVal);
-            data[i].push(1); // Overlap
+            indices.push(groupIdx);
 
-
+            pointsAlt[groupRow][groupCol] = points.slice(pointGroupXIdx, pointGroupXIdx + 3);
         }
 
-        const dataUint16 = new Uint16Array(data.flat());
+        const test = [];
+        for (let i = 0; i < maxResolution; i++) {
+            for (let j = 0; j < maxResolution; j++) {
+                if (pointsAlt[i][j][2] > 0) {
+                    for (let k = 0; k < 3; k++) {
+                        test.push(pointsAlt[i][j][k]);
+                    }
+                }
+            }
+        }
 
-        console.log(data.length, dataUint16.length / 3);
-        console.log(points.length, points.length / 3, maxResolution**2);
-
-        startRendering(points);
+        startRendering(new Uint16Array(test));
     });
 
 })();
