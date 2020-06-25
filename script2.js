@@ -96,6 +96,11 @@ function createProgram(gl, shaders) {
     return program;
 }
 
+const pixelRatio = window.devicePixelRatio || 1;
+const screenWidth = window.screen.width * pixelRatio;
+const screenHeight = window.screen.width * pixelRatio;
+
+const maxResolution = Math.max(screenWidth, screenHeight);
 
 let vertexShader = null;
 let fragmentShader = null;
@@ -107,10 +112,10 @@ const alphaInput = document.getElementById('alpha');
 const markerSizeInput = document.getElementById('marker-size');
 const colorInput = document.getElementById('color');
 
-markerSizeInput.setAttribute('min', window.devicePixelRatio);
+markerSizeInput.setAttribute('min', pixelRatio);
 
-const getWidth = () => canvas.clientWidth * window.devicePixelRatio;
-const getHeight = () => canvas.clientHeight * window.devicePixelRatio;
+const getWidth = () => canvas.clientWidth * pixelRatio;
+const getHeight = () => canvas.clientHeight * pixelRatio;
 const getAlpha = () => parseFloat(alphaInput.value);
 const getMarkerSize = () => parseFloat(markerSizeInput.value);
 const getColor = () => colorInput.value;
@@ -172,7 +177,7 @@ function renderScatterPlot(gl, canvas, dataUint16) {
 
     gl.uniform1f(pointSizeLocation, getMarkerSize());
     gl.uniform1f(alphaLocation, getAlpha());
-    gl.uniform1f(maxPositionLocation, Math.pow(2, 16) - 1);
+    gl.uniform1f(maxPositionLocation,2**16 - 1);
     gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
     gl.uniform3f(colorLocation, ...hex2rgb(colorHex));
 
@@ -188,7 +193,6 @@ function startRendering(dataUint16) {
     // https://www.khronos.org/webgl/wiki/HandlingContextLost
 
     const gl = canvas.getContext('webgl');
-    let firstTime = true;
     let frameRequestId;
 
     function renderLoop() {
@@ -198,7 +202,8 @@ function startRendering(dataUint16) {
             || alpha !== getAlpha()
             || markerSize !== getMarkerSize()
             || colorHex !== getColor()) {
-            firstTime = false;
+
+            alpha = getAlpha();
             width = getWidth();
             height = getHeight();
             canvas.width = width;
@@ -230,6 +235,8 @@ function startRendering(dataUint16) {
 
 (() => {
 
+    const points = new Uint16Array(3 * maxResolution**2).fill(0);
+
     fetch("./example-data/out5d.csv").then(res => res.text()).then(csv => {
         const lines = csv.split("\n");
 
@@ -257,20 +264,44 @@ function startRendering(dataUint16) {
         const xRange = xMax - xMin;
         const yRange = yMax - yMin;
 
-        const maxVal = Math.pow(2, 16) - 1;
+        const maxVal = 2**16 - 1;
 
 
         for (let i = 0; i < data.length; i++) {
+            const [x, y] = data[i];
+            const xNorm = (x - xMin) / xRange;
+            const yNorm = (y - yMin) / yRange;
+            const xScaled = xNorm * maxVal;
+            const yScaled = yNorm * maxVal;
+
+            const groupRow = Math.min(maxResolution - 1, Math.floor(xNorm * maxResolution));
+            const groupCol = Math.min(maxResolution - 1, Math.floor(yNorm * maxResolution));
+            const groupOffset = 3 * (groupRow * maxResolution + groupCol);
+            const pointGroupXIdx = groupOffset;
+            const pointGroupYIdx = groupOffset + 1;
+            const pointGroupNIdx = groupOffset + 2;
+
+            const oldGroupX = points[pointGroupXIdx];
+            const oldGroupY = points[pointGroupYIdx];
+            const oldGroupN = points[pointGroupNIdx];
+            points[pointGroupXIdx] = Math.round((oldGroupX * oldGroupN + xScaled) / (oldGroupN + 1));
+            points[pointGroupYIdx] = Math.round((oldGroupY * oldGroupN + yScaled) / (oldGroupN + 1));
+            points[pointGroupNIdx]++;
+
             data[i][0] = Math.round((data[i][0] - xMin) / xRange * maxVal);
             data[i][1] = Math.round((data[i][1] - yMin) / yRange * maxVal);
             data[i].push(1); // Overlap
+
+
         }
 
         const dataUint16 = new Uint16Array(data.flat());
 
         console.log(data.length, dataUint16.length / 3);
+        console.log(points.length, points.length / 3, maxResolution**2);
+        //console.log(points.filter(e => e > 0));
 
-        startRendering(dataUint16);
+        startRendering(points);
     });
 
 })();
