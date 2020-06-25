@@ -34,7 +34,8 @@ void main() {
    // convert from 0->2 to -1->+1 (clipspace)
    vec2 clipSpace = zeroToTwo - 1.0;
 
-   gl_Position = vec4(clipSpace * vec2(1, u_flipY), 0, 1);
+   //gl_Position = vec4(clipSpace * vec2(1, u_flipY), 0, 1);
+   gl_Position = vec4(a_position, 0, 1);
 
    // pass the texCoord to the fragment shader
    // The GPU will interpolate this value between points.
@@ -73,19 +74,16 @@ void main() {
     }
 
     void main() {
-        vec2 dstPixelSize = 1. / u_dstSize;
 
         if (u_stage == 0) {
             // Downscale density map
 
             vec2 scale = u_srcSize / u_dstSize;
-
             vec2 srcPixelSize = 1. / u_srcSize;
-
+            vec2 dstPixelSize = 1. / u_dstSize;
 
             float count = 0.;
             vec2 offset = vec2(0., 0.);
-            //float yOffset = 0.;
 
             ivec2 dstPixel = ivec2(v_texCoord * (u_dstSize - 1.));
             ivec2 srcPixelStart = ivec2(vec2(dstPixel) * scale);
@@ -97,38 +95,32 @@ void main() {
             vec2 startOffset = (vec2(dstPixel) / (u_dstSize - 1.)) - startF;
             vec2 endOffset = endF - (vec2(dstPixel + 1) / (u_dstSize - 1.));
 
-            float x;
-            float y;
-            int xSample = srcPixelStart.x;
-            int ySample = srcPixelStart.y;
+            vec2 coord;
+            vec4 dataSample;
+            int x = srcPixelStart.x;
+            int y = srcPixelStart.y;
 
             for (int i = 0; i < 9999; i++) {
-                if (ySample > srcPixelEnd.y) {
+                if (y > srcPixelEnd.y) {
                     break;
                 }
-                x = (float(xSample) + .5) / (u_srcSize.x - 1.);
-                y = (float(ySample) + .5) / (u_srcSize.y - 1.);
-
-                vec4 dataSample = texture2D(u_image, vec2(x, y));
+                coord = (vec2(x, y) + .5) / (u_srcSize - 1.);
+                dataSample = texture2D(u_image, coord);
 
                 if (
-                    true &&
-                    (xSample > srcPixelStart.x || dataSample.x >= startOffset.x) &&
-                    (ySample > srcPixelStart.y || dataSample.y >= startOffset.y) &&
-                    (xSample < srcPixelEnd.x || dataSample.x < endOffset.x) &&
-                    (ySample < srcPixelEnd.y || dataSample.y < endOffset.y)
+                    (x > srcPixelStart.x || dataSample.x >= startOffset.x) &&
+                    (y > srcPixelStart.y || dataSample.y >= startOffset.y) &&
+                    (x < srcPixelEnd.x || dataSample.x < endOffset.x) &&
+                    (y < srcPixelEnd.y || dataSample.y < endOffset.y)
                 ) {
                     count += channels_to_count(dataSample.zw);
-                    //xOffset += dataSample.x;
-                    //yOffset += dataSample.y;
                     offset += dataSample.xy;
                 }
 
-
-                xSample++;
-                if (xSample > srcPixelEnd.x) {
-                    xSample = srcPixelStart.x;
-                    ySample++;
+                x++;
+                if (x > srcPixelEnd.x) {
+                    x = srcPixelStart.x;
+                    y++;
                 }
             }
 
@@ -138,18 +130,21 @@ void main() {
         } else if (u_stage == 1) {
             // Apply marker
 
+            vec2 dstPixelSize = 1. / u_dstSize;
+
             float count = 0.;
 
-            int x = 0;
-            int y = 0;
+            int x = -marker_w / 2;
+            int max_x = x + marker_w;
+            int y = -marker_w / 2;
 
             for (int i = 0; i < marker_len; i++) {
                 vec4 dataSample = texture2D(u_image, v_texCoord + dstPixelSize * vec2(x, y));
                 count += u_marker[i] * channels_to_count(dataSample.zw);
 
                 x++;
-                if (x >= marker_w) {
-                    x = 0;
+                if (x >= max_x) {
+                    x -= marker_w;
                     y++;
                 }
             }
