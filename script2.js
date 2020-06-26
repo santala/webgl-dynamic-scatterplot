@@ -10,8 +10,11 @@ const vertexShaderSource = `
     uniform float u_maxPosition;
     uniform vec2 u_resolution;
     uniform float u_pointSize;
+    uniform float u_lookupTexWidth;
+    uniform float u_alpha;
     
     varying float v_pointCount;
+    varying vec2 v_lookupTexCoord;
 
     void main() {
         // Add padding accoring to point size
@@ -21,6 +24,7 @@ const vertexShaderSource = `
         gl_Position = vec4(normalizedPositionWithPadding, 0, 1);
         gl_PointSize = u_pointSize;
         v_pointCount = a_position.z;
+        v_lookupTexCoord = vec2((v_pointCount + .5) / u_lookupTexWidth, u_alpha); // compute alpha lookup texture coordinate
     }
 `;
 
@@ -44,18 +48,17 @@ const fragmentShaderSource = `
     
     // Overlap passed in from the vertex shader
     varying float v_pointCount;
+    varying vec2 v_lookupTexCoord;
     
     void main() {
         if (v_pointCount == 0.) {
             discard;
-        }
-        
-        if (sqrt(pow(gl_PointCoord.x - .5, 2.) + pow(gl_PointCoord.y - .5, 2.)) > .5) {
+        } else if (distance(gl_PointCoord, vec2(.5)) > 0.5) {
             discard;
+        } else {
+            float opacity = texture2D(u_lookupTable, v_lookupTexCoord).a;
+            gl_FragColor = vec4(u_color * opacity, opacity);
         }
-        float opacity = texture2D(u_lookupTable, vec2((v_pointCount + .5) / u_lookupTexWidth, u_alpha)).a;
-        
-        gl_FragColor = vec4(u_color * opacity, opacity);
     }
 `;
 
