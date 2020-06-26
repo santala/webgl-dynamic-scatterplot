@@ -53,32 +53,59 @@ const fragmentShaderSource = `
         if (sqrt(pow(gl_PointCoord.x - .5, 2.) + pow(gl_PointCoord.y - .5, 2.)) > .5) {
             discard;
         }
-        float opacity = texture2D(u_lookupTable, vec2((v_pointCount + .5) / u_lookupTexWidth, .5)).a;
+        float opacity = texture2D(u_lookupTable, vec2((v_pointCount + .5) / u_lookupTexWidth, u_alpha)).a;
         
         gl_FragColor = vec4(u_color * opacity, opacity);
     }
 `;
 
 
-let lookupTable;
+const maxOverlap = 2**16 - 1; // Max Uint16 value
+const alphaResolution = 1000;
 
-function computeLookupTable(lookupTable, alpha) {
-    if (alpha === 0) {
-        lookupTable.fill(0);
-        return;
-    }
-    lookupTable[0] = 0;
-    const transparency =  1 - alpha;
-    let accumulatedTransparency = 1;
-    for (let i = 1; i < lookupTable.length; i++) {
-        accumulatedTransparency *= transparency;
-        const opacity = Math.round(255 - 255 * accumulatedTransparency);
-        if (opacity === 255) {
-            lookupTable.fill(255, i);
-            break;
+let alphaLookupTable;
+
+function computeLookupData(gl) {
+    const maxTextureSize = Math.floor(gl.getParameter(gl.MAX_TEXTURE_SIZE));
+    const height = Math.min(maxTextureSize, alphaResolution);
+    let width = Math.min(maxTextureSize, maxOverlap);
+
+    const lookupTable = new Array(height);
+
+    let maxRowWidth = 0;
+
+    for (let row = 0; row < height; row++) {
+        lookupTable[row] = [0];
+        const alpha = row / (height - 1);
+        const transparency =  1 - alpha;
+        let accumulatedTransparency = 1;
+        for (let col = 1; col < width; col++) {
+            accumulatedTransparency *= transparency;
+            const opacity = Math.round(255 - 255 * accumulatedTransparency);
+            lookupTable[row][col] = opacity;
+            if (opacity === 255) {
+                // Full opacity reached
+                maxRowWidth = Math.max(maxRowWidth, col);
+                break;
+            }
         }
-        lookupTable[i] = opacity;
     }
+
+    const data = new Uint8Array(maxRowWidth * height);
+
+    for (let row = 0, i = 0; row < height; row++) {
+        for (let col = 0; col < maxRowWidth; col++, i++) {
+            if (col < lookupTable[row].length) {
+                data[i] = lookupTable[row][col];
+            } else {
+                data[i] = 255;
+            }
+        }
+    }
+
+    width = maxRowWidth;
+
+    return { data, width, height };
 }
 
 
@@ -129,7 +156,9 @@ const alphaInput = document.getElementById('alpha');
 const markerSizeInput = document.getElementById('marker-size');
 const colorInput = document.getElementById('color');
 
-markerSizeInput.setAttribute('min', pixelRatio);
+alphaInput.setAttribute('min', (1 / alphaResolution).toString());
+alphaInput.setAttribute('step', (1 / alphaResolution).toString());
+markerSizeInput.setAttribute('min', pixelRatio.toString());
 
 const getWidth = () => canvas.clientWidth * pixelRatio;
 const getHeight = () => canvas.clientHeight * pixelRatio;
@@ -182,12 +211,14 @@ function renderScatterPlot(gl, canvas, dataUint16) {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 
-    const lookupTextureWidth = Math.floor(Math.min(2**16 - 1, gl.getParameter(gl.MAX_TEXTURE_SIZE)));
-    lookupTable = lookupTable || new Uint8Array(lookupTextureWidth);
-    computeLookupTable(lookupTable, alpha);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.ALPHA, lookupTextureWidth, 1, 0, gl.ALPHA, gl.UNSIGNED_BYTE, lookupTable);
+    //const lookupTextureWidth = Math.floor(Math.min(2**16 - 1, gl.getParameter(gl.MAX_TEXTURE_SIZE)));
+    //lookupTable = lookupTable || new Uint8Array(lookupTextureWidth);
+    //computeLookupTable(lookupTable, alpha);
 
+    alphaLookupTable = alphaLookupTable || computeLookupData(gl);
+    console.log(alphaLookupTable);
 
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.ALPHA, alphaLookupTable.width, alphaLookupTable.height, 0, gl.ALPHA, gl.UNSIGNED_BYTE, alphaLookupTable.data);
 
     // Clear the canvas
     gl.clearColor(0, 0, 0, 0);
@@ -198,7 +229,7 @@ function renderScatterPlot(gl, canvas, dataUint16) {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
-    gl.uniform1f(lookupTextureWidthLocation, lookupTextureWidth);
+    gl.uniform1f(lookupTextureWidthLocation, alphaLookupTable.width);
 
 
     // Turn on the position attribute
@@ -211,7 +242,8 @@ function renderScatterPlot(gl, canvas, dataUint16) {
     gl.vertexAttribPointer(positionLocation, 3, gl.UNSIGNED_SHORT, false, 0, 0);
 
     gl.uniform1f(pointSizeLocation, getMarkerSize());
-    gl.uniform1i(alphaLocation, getAlpha());
+    gl.uniform1f(alphaLocation, getAlpha());
+    console.log('alpha', getAlpha())
     gl.uniform1f(maxPositionLocation,2**16 - 1);
     gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
     gl.uniform3f(colorLocation, ...hex2rgb(colorHex));
@@ -230,7 +262,12 @@ function startRendering(dataUint16) {
     const gl = canvas.getContext('webgl');
     let frameRequestId;
 
-    function renderLoop() {
+    function renderLoop(didUpdate) {
+
+        if (didUpdate) {
+            console.timeEnd('Frame');
+        }
+        didUpdate = false;
 
         if (width !== getWidth()
             || height !== getHeight()
@@ -246,12 +283,12 @@ function startRendering(dataUint16) {
             markerSize = getMarkerSize();
             colorHex = getColor();
 
-            console.log(colorHex);
-
+            console.time('Frame');
             frameRequestId = renderScatterPlot(gl, canvas, dataUint16);
+            didUpdate = true;
         }
 
-        requestAnimationFrame(renderLoop)
+        requestAnimationFrame(renderLoop.bind(this, didUpdate));
     }
 
     canvas.addEventListener('webglcontextlost', (e) => {
@@ -339,9 +376,14 @@ function startRendering(dataUint16) {
         console.timeEnd('Preparing data');
 
 
-        console.log('Rendering...');
 
-        startRendering(new Uint16Array(points));
+
+        //const pointsUint16 = new Uint16Array([...Array(10).keys()].flatMap(_ => points));
+        const pointsUint16 = new Uint16Array(points);
+
+        console.log(`Rendering ${pointsUint16.length / 3} groups...`);
+
+        startRendering(pointsUint16);
     });
 
 })();
