@@ -21,7 +21,7 @@ const webGL1VertexShaderSource = `
     void main() {
         // Add padding according to point size
         vec2 relPointSize = u_pointSize / u_resolution;
-        vec2 normalizedPositionWithPadding = (a_position.xy / u_maxPosition * 2.0 - 1.) * (1.-relPointSize);
+        vec2 normalizedPositionWithPadding = (a_position.xy / u_maxPosition * 2.0 - 1.) * (1. - relPointSize);
 
         gl_Position = vec4(normalizedPositionWithPadding, 0, 1);
         gl_PointSize = u_pointSize;
@@ -142,7 +142,7 @@ export default class Scatterplot {
         this.width = canvas.width;
         this.height = canvas.height;
         this.pointSize = 3;
-        this.color = "#ffaa33";
+        this.color = [0, 0, 0];
         this.alpha = .5;
 
         this.pointsUint16 = null;
@@ -192,7 +192,7 @@ export default class Scatterplot {
                     const yScaled = yNorm * maxVal;
 
                     const groupRow = ~~(xNorm * this.maxHeight); // cast to int
-                    const groupCol = ~~(yNorm * this.maxWidth); // cast to int
+                    const groupCol = ~~(yNorm * this.maxWidth);
                     const groupIdx = groupRow * this.maxWidth + groupCol;
 
                     const groupOffset = groupOffsets[groupIdx];
@@ -243,11 +243,7 @@ export default class Scatterplot {
                 this.canvas.width = this.width;
                 this.canvas.height = this.height;
 
-                console.log("Design updated. Rendering…");
-                console.log(this.width, this.height)
                 this.render();
-            } else {
-                console.log("Design not updated.");
             }
         };
 
@@ -258,10 +254,7 @@ export default class Scatterplot {
             const gl = this.gl;
             const program = this.program;
 
-            const attributes = glUtil.getAttributeLocations(gl, program, [
-                "a_position"
-            ]);
-            console.log(attributes);
+            const attributes = glUtil.getAttributeLocations(gl, program);
             const uniforms = glUtil.getUniforms(gl, program);
 
             const positionBuffer = gl.createBuffer();
@@ -269,7 +262,6 @@ export default class Scatterplot {
             gl.bufferData(gl.ARRAY_BUFFER, this.pointsUint16, gl.DYNAMIC_DRAW);
 
             gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); // For data textures where row width is not a multiple of 4
-
 
             const lookupTableTexture = gl.createTexture();
             gl.bindTexture(gl.TEXTURE_2D, lookupTableTexture);
@@ -279,7 +271,6 @@ export default class Scatterplot {
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 
             alphaLookupTable = alphaLookupTable || computeLookupData(gl);
-            console.log(alphaLookupTable);
 
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.ALPHA, alphaLookupTable.width, alphaLookupTable.height, 0, gl.ALPHA, gl.UNSIGNED_BYTE, alphaLookupTable.data);
 
@@ -293,28 +284,21 @@ export default class Scatterplot {
             gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
             uniforms.lookupTexWidth = alphaLookupTable.width;
+            uniforms.maxPosition = 2**16 - 1;
 
             // Turn on the position attribute
-            gl.enableVertexAttribArray(attributes["a_position"]);
+            gl.enableVertexAttribArray(attributes.position);
 
             // Bind the position buffer.
             gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
 
             // Tell the position attribute how to get data out of positionBuffer (ARRAY_BUFFER)
-            gl.vertexAttribPointer(attributes["a_position"], 3, gl.UNSIGNED_SHORT, false, 0, 0);
+            gl.vertexAttribPointer(attributes.position, 3, gl.UNSIGNED_SHORT, false, 0, 0);
 
-            uniforms.pointSize = this.pointSize;
-            uniforms.alpha = this.alpha;
-            console.log("alpha", this.alpha);
-            uniforms.maxPosition = 2**16 - 1;
             uniforms.resolution = [canvas.width, canvas.height];
+            uniforms.pointSize = this.pointSize;
             uniforms.color = this.color;
-
-            console.log(
-                uniforms.alpha, uniforms.color,
-                gl.getUniform(program, uniforms.alpha),
-                gl.getUniform(program, uniforms.color),
-            );
+            uniforms.alpha = this.alpha;
 
             gl.bindFramebuffer(gl.FRAMEBUFFER, null);
             gl.viewport(0, 0, canvas.width, canvas.height);

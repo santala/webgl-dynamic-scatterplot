@@ -43,7 +43,7 @@ const refreshDesign = () => {
 };
 
 [alphaInput, markerSizeInput, colorInput].forEach(input => {
-    input.addEventListener("change", refreshDesign);
+    input.addEventListener("input", refreshDesign);
 });
 
 plot.loadData("./example-data/out5d.csv").then(refreshDesign);

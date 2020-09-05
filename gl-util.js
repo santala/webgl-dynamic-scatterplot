@@ -33,21 +33,27 @@ export function createProgram(gl, shaders) {
 
 
 export function getAttributeLocations(gl, program, names) {
-    return Object.fromEntries(names.map(name => [name, gl.getAttribLocation(program, name)]));
+    const attributeLocations = {};
+    const n = gl.getProgramParameter(program, gl.ACTIVE_ATTRIBUTES);
+
+    for (let i = 0; i < n; i++) {
+        let { name } = gl.getActiveAttrib(program, i);
+        const location = gl.getAttribLocation(program, name);
+        if (name.substr(0, 2) === "a_") {
+            name = name.substr(2);
+        }
+        attributeLocations[name] = location;
+    }
+
+    return Object.freeze(attributeLocations);
 }
-
-
-export function getUniformLocations(gl, program, names) {
-    return Object.fromEntries(names.map(name => [name, gl.getUniformLocation(program, name)]));
-}
-
 
 export function getUniforms(gl, program) {
     const uniforms = {};
-
     const n = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
+
     for (let i = 0; i < n; i++) {
-        let {name, type} = gl.getActiveUniform(program, i);
+        let { name, type } = gl.getActiveUniform(program, i);
         const location = gl.getUniformLocation(program, name);
         if (name.substr(-3) === "[0]") {
             name = name.substr(0, name.length - 3);
@@ -75,8 +81,8 @@ export function getUniforms(gl, program) {
             [gl.FLOAT_MAT3]: v => gl.uniformMatrix3fv(location, false, v),
             [gl.FLOAT_MAT4]: v => gl.uniformMatrix4fv(location, false, v),
         }[type];
-        const getter = () => location;
-        console.log(name, location);
+        const getter = () => gl.getUniform(program, location);
+
         Object.defineProperty(uniforms, name, { set: setter, get: getter });
     }
     return Object.freeze(uniforms);
