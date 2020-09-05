@@ -5,9 +5,9 @@ export function compileShader(gl, shaderType, source) {
     gl.shaderSource(shader, source);
     gl.compileShader(shader);
 
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        const lastError = gl.getShaderInfoLog(shader);
-        console.error('*** Error compiling shader \'' + shader + '\':' + lastError);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS) && !gl.isContextLost()) {
+        const infoLog = gl.getShaderInfoLog(shader);
+        console.error(`Error compiling shader ‘${shader}’:\n${infoLog}`);
         gl.deleteShader(shader);
         return null;
     }
@@ -20,11 +20,9 @@ export function createProgram(gl, shaders) {
     shaders.forEach(shader => gl.attachShader(program, shader));
     gl.linkProgram(program);
 
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-        // something went wrong with the link
-        const lastError = gl.getProgramInfoLog(program);
-        console.error('Error in program linking:' + lastError);
-
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS) && !gl.isContextLost()) {
+        const infoLog = gl.getProgramInfoLog(program);
+        console.error(`Error linking program:\n${infoLog}`);
         gl.deleteProgram(program);
         return null;
     }
@@ -37,7 +35,7 @@ export function getAttributeLocations(gl, program, names) {
     const n = gl.getProgramParameter(program, gl.ACTIVE_ATTRIBUTES);
 
     for (let i = 0; i < n; i++) {
-        let { name } = gl.getActiveAttrib(program, i);
+        let { name = "" } = gl.getActiveAttrib(program, i) || {};
         const location = gl.getAttribLocation(program, name);
         if (name.substr(0, 2) === "a_") {
             name = name.substr(2);
@@ -52,38 +50,42 @@ export function getUniforms(gl, program) {
     const uniforms = {};
     const n = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
 
-    for (let i = 0; i < n; i++) {
-        let { name, type } = gl.getActiveUniform(program, i);
-        const location = gl.getUniformLocation(program, name);
-        if (name.substr(-3) === "[0]") {
-            name = name.substr(0, name.length - 3);
+    try {
+        for (let i = 0; i < n; i++) {
+            let { name, type } = gl.getActiveUniform(program, i) || {};
+            const location = gl.getUniformLocation(program, name);
+            if (name.substr(-3) === "[0]") {
+                name = name.substr(0, name.length - 3);
+            }
+            if (name.substr(0, 2) === "u_") {
+                name = name.substr(2);
+            }
+            const setter = {
+                [gl.FLOAT]: v => typeof v === "number" ? gl.uniform1f(location, v) : gl.uniform1fv(location, v),
+                [gl.FLOAT_VEC2]: v => gl.uniform2f(location, ...v),
+                [gl.FLOAT_VEC3]: v => gl.uniform3f(location, ...v),
+                [gl.FLOAT_VEC4]: v => gl.uniform4f(location, ...v),
+
+                [gl.INT]: v => typeof v === "number" ? gl.uniform1i(location, v) : gl.uniform1iv(location, v),
+                [gl.INT_VEC2]: v => gl.uniform2i(location, ...v),
+                [gl.INT_VEC3]: v => gl.uniform3i(location, ...v),
+                [gl.INT_VEC4]: v => gl.uniform4i(location, ...v),
+
+                [gl.BOOL]: v => typeof v === "number" ? gl.uniform1i(location, v) : gl.uniform1iv(location, v),
+                [gl.BOOL_VEC2]: v => gl.uniform2i(location, ...v),
+                [gl.BOOL_VEC3]: v => gl.uniform3i(location, ...v),
+                [gl.BOOL_VEC4]: v => gl.uniform4i(location, ...v),
+
+                [gl.FLOAT_MAT2]: v => gl.uniformMatrix2fv(location, false, v),
+                [gl.FLOAT_MAT3]: v => gl.uniformMatrix3fv(location, false, v),
+                [gl.FLOAT_MAT4]: v => gl.uniformMatrix4fv(location, false, v),
+            }[type];
+            const getter = () => gl.getUniform(program, location);
+
+            Object.defineProperty(uniforms, name, { set: setter, get: getter });
         }
-        if (name.substr(0, 2) === "u_") {
-            name = name.substr(2);
-        }
-        const setter = {
-            [gl.FLOAT]: v => typeof v === "number" ? gl.uniform1f(location, v) : gl.uniform1fv(location, v),
-            [gl.FLOAT_VEC2]: v => gl.uniform2f(location, ...v),
-            [gl.FLOAT_VEC3]: v => gl.uniform3f(location, ...v),
-            [gl.FLOAT_VEC4]: v => gl.uniform4f(location, ...v),
-
-            [gl.INT]: v => typeof v === "number" ? gl.uniform1i(location, v) : gl.uniform1iv(location, v),
-            [gl.INT_VEC2]: v => gl.uniform2i(location, ...v),
-            [gl.INT_VEC3]: v => gl.uniform3i(location, ...v),
-            [gl.INT_VEC4]: v => gl.uniform4i(location, ...v),
-
-            [gl.BOOL]: v => typeof v === "number" ? gl.uniform1i(location, v) : gl.uniform1iv(location, v),
-            [gl.BOOL_VEC2]: v => gl.uniform2i(location, ...v),
-            [gl.BOOL_VEC3]: v => gl.uniform3i(location, ...v),
-            [gl.BOOL_VEC4]: v => gl.uniform4i(location, ...v),
-
-            [gl.FLOAT_MAT2]: v => gl.uniformMatrix2fv(location, false, v),
-            [gl.FLOAT_MAT3]: v => gl.uniformMatrix3fv(location, false, v),
-            [gl.FLOAT_MAT4]: v => gl.uniformMatrix4fv(location, false, v),
-        }[type];
-        const getter = () => gl.getUniform(program, location);
-
-        Object.defineProperty(uniforms, name, { set: setter, get: getter });
+    } catch (e) {
+        console.error("Context lost:", gl.isContextLost(), "Error:", e);
     }
     return Object.freeze(uniforms);
 }

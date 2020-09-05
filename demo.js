@@ -10,7 +10,13 @@ function hex2rgb(hex) {
 const pixelRatio = window.devicePixelRatio || 1;
 const alphaResolution = 1000;
 
-const canvas = document.getElementById("canvas");
+let canvas = document.getElementById("canvas");
+
+canvas = WebGLDebugUtils.makeLostContextSimulatingCanvas(canvas);
+const nCalls = Math.round(Math.random() * 100);
+console.log("loseContextInNCalls", nCalls);
+canvas.loseContextInNCalls(nCalls);
+
 const alphaInput = document.getElementById('alpha');
 const markerSizeInput = document.getElementById('marker-size');
 const colorInput = document.getElementById('color');
@@ -40,10 +46,13 @@ const refreshDesign = () => {
         color: getColor(),
         alpha: getAlpha()
     });
+    console.log("num calls: " + canvas.getNumCalls());
 };
 
 [alphaInput, markerSizeInput, colorInput].forEach(input => {
     input.addEventListener("input", refreshDesign);
 });
+window.addEventListener("resize", refreshDesign);
 
 plot.loadData("./example-data/out5d.csv").then(refreshDesign);
+

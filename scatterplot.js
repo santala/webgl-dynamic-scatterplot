@@ -72,8 +72,6 @@ const webGL2VertexShaderSource = `
 const webGL2FragmentShaderSource = `
 `;
 
-let alphaLookupTable;
-
 function computeLookupData(gl) {
     const alphaResolution = 1000;
 
@@ -125,19 +123,20 @@ export default class Scatterplot {
         this.maxWidth = maxWidth;
         this.maxHeight = maxHeight;
 
+        this.canvas.addEventListener("webglcontextlost", e => {
+            console.log("WebGL context lost.", canvas.getNumCalls());
+            e.preventDefault();  // Allows the context to be restored
+        });
+        canvas.addEventListener("webglcontextrestored", (e) => {
+            console.log("WebGL context restored.");
+            canvas.loseContextInNCalls(Math.round(Math.random() * 1000));
+            this.setup();
+        });
+
         this.gl = this.canvas.getContext("webgl2");
         this.useWebGL2 = !!this.gl;
         // If WebGL 2.0 isn’t supported, use WebGL 1.0
         this.gl = this.gl || this.canvas.getContext("webgl");
-        const gl = this.gl;
-
-        const vertexShaderSource = this.useWebGL2 ? webGL2VertexShaderSource : webGL1VertexShaderSource;
-        const vertexShader = glUtil.compileShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
-
-        const fragmentShaderSource = this.useWebGL2 ? webGL2FragmentShaderSource : webGL1FragmentShaderSource;
-        const fragmentShader = glUtil.compileShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
-
-        this.program = glUtil.createProgram(gl, [vertexShader, fragmentShader]);
 
         this.width = canvas.width;
         this.height = canvas.height;
@@ -145,7 +144,7 @@ export default class Scatterplot {
         this.color = [0, 0, 0];
         this.alpha = .5;
 
-        this.pointsUint16 = null;
+        this.pointsUint16 = new Uint16Array();
 
         this.loadData = (url) => {
             const points = [];
@@ -224,7 +223,6 @@ export default class Scatterplot {
         };
 
         this.updateDesign = ({ width, height, pointSize, color, alpha}) => {
-            console.log(width, height);
             width = width || this.width;
             height = height || this.height;
             pointSize = pointSize || this.pointSize;
@@ -247,21 +245,28 @@ export default class Scatterplot {
             }
         };
 
-        this.render = () => {
-            if (!this.pointsUint16) {
-                return;
-            }
+        this.setup = () => {
             const gl = this.gl;
-            const program = this.program;
 
-            const attributes = glUtil.getAttributeLocations(gl, program);
-            const uniforms = glUtil.getUniforms(gl, program);
+            const vertexShaderSource = this.useWebGL2 ? webGL2VertexShaderSource : webGL1VertexShaderSource;
+            const vertexShader = glUtil.compileShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+
+            const fragmentShaderSource = this.useWebGL2 ? webGL2FragmentShaderSource : webGL1FragmentShaderSource;
+            const fragmentShader = glUtil.compileShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+
+            this.program = glUtil.createProgram(gl, [vertexShader, fragmentShader]);
+
+            this.attributes = glUtil.getAttributeLocations(gl, this.program);
+            this.uniforms = glUtil.getUniforms(gl, this.program);
+
+            this.alphaLookupTable = computeLookupData(gl);
 
             const positionBuffer = gl.createBuffer();
             gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
             gl.bufferData(gl.ARRAY_BUFFER, this.pointsUint16, gl.DYNAMIC_DRAW);
 
-            gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); // For data textures where row width is not a multiple of 4
+            // For data textures where row width is not a multiple of 4
+            gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
 
             const lookupTableTexture = gl.createTexture();
             gl.bindTexture(gl.TEXTURE_2D, lookupTableTexture);
@@ -270,39 +275,52 @@ export default class Scatterplot {
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 
-            alphaLookupTable = alphaLookupTable || computeLookupData(gl);
-
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.ALPHA, alphaLookupTable.width, alphaLookupTable.height, 0, gl.ALPHA, gl.UNSIGNED_BYTE, alphaLookupTable.data);
-
-            // Clear the canvas
-            gl.clearColor(0, 0, 0, 0);
-            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.ALPHA, this.alphaLookupTable.width, this.alphaLookupTable.height,
+                0, gl.ALPHA, gl.UNSIGNED_BYTE, this.alphaLookupTable.data);
 
             // Tell it to use our program (pair of shaders)
-            gl.useProgram(program);
+            gl.useProgram(this.program);
             gl.enable(gl.BLEND);
             gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
-            uniforms.lookupTexWidth = alphaLookupTable.width;
-            uniforms.maxPosition = 2**16 - 1;
-
             // Turn on the position attribute
-            gl.enableVertexAttribArray(attributes.position);
+            gl.enableVertexAttribArray(this.attributes.position);
 
             // Bind the position buffer.
             gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
 
             // Tell the position attribute how to get data out of positionBuffer (ARRAY_BUFFER)
-            gl.vertexAttribPointer(attributes.position, 3, gl.UNSIGNED_SHORT, false, 0, 0);
+            gl.vertexAttribPointer(this.attributes.position, 3, gl.UNSIGNED_SHORT, false, 0, 0);
 
-            uniforms.resolution = [canvas.width, canvas.height];
-            uniforms.pointSize = this.pointSize;
-            uniforms.color = this.color;
-            uniforms.alpha = this.alpha;
+            this.render();
+        };
+
+        this.render = () => {
+            const { gl, uniforms, alphaLookupTable } = this;
+
+            // Clear the canvas
+            gl.clearColor(0, 0, 0, 0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            try {
+                uniforms.lookupTexWidth = alphaLookupTable.width;
+                uniforms.maxPosition = 2**16 - 1;
+
+                uniforms.resolution = [canvas.width, canvas.height];
+                uniforms.pointSize = this.pointSize;
+                uniforms.color = this.color;
+                uniforms.alpha = this.alpha;
+            } catch (e) {
+                // Trying to set a uniform that doesn’t exist (e.g. due to a lost WebGL context)
+                // will lead to a TypeError
+                console.error("Context lost:", gl.isContextLost(), "Error:", e);
+            }
 
             gl.bindFramebuffer(gl.FRAMEBUFFER, null);
             gl.viewport(0, 0, canvas.width, canvas.height);
             gl.drawArrays(gl.POINTS, 0, this.pointsUint16.length / 3);
         };
+
+        this.setup();
     }
 }
