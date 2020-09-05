@@ -150,7 +150,7 @@ export default class Scatterplot {
             const points = [];
             const groupOffsets = [];
 
-            return fetch("./example-data/isabel_250k.csv").then(res => res.text()).then(csv => {
+            return fetch(url).then(res => res.text()).then(csv => {
                 console.log('Parsing CSV...');
 
                 const lines = csv.split("\n");
@@ -261,9 +261,14 @@ export default class Scatterplot {
 
             this.alphaLookupTable = computeLookupData(gl);
 
-            const positionBuffer = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            // Turn on the position attribute
+            gl.enableVertexAttribArray(this.attributes.position);
+
+            this.positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
             gl.bufferData(gl.ARRAY_BUFFER, this.pointsUint16, gl.DYNAMIC_DRAW);
+            // Tell the position attribute how to get data out of positionBuffer (ARRAY_BUFFER)
+            gl.vertexAttribPointer(this.attributes.position, 3, gl.UNSIGNED_SHORT, false, 0, 0);
 
             // For data textures where row width is not a multiple of 4
             gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -278,19 +283,9 @@ export default class Scatterplot {
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.ALPHA, this.alphaLookupTable.width, this.alphaLookupTable.height,
                 0, gl.ALPHA, gl.UNSIGNED_BYTE, this.alphaLookupTable.data);
 
-            // Tell it to use our program (pair of shaders)
             gl.useProgram(this.program);
             gl.enable(gl.BLEND);
             gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-
-            // Turn on the position attribute
-            gl.enableVertexAttribArray(this.attributes.position);
-
-            // Bind the position buffer.
-            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-
-            // Tell the position attribute how to get data out of positionBuffer (ARRAY_BUFFER)
-            gl.vertexAttribPointer(this.attributes.position, 3, gl.UNSIGNED_SHORT, false, 0, 0);
 
             this.render();
         };
@@ -318,7 +313,9 @@ export default class Scatterplot {
 
             gl.bindFramebuffer(gl.FRAMEBUFFER, null);
             gl.viewport(0, 0, canvas.width, canvas.height);
-            gl.drawArrays(gl.POINTS, 0, this.pointsUint16.length / 3);
+            //gl.drawArrays(gl.POINTS, 0, this.pointsUint16.length / 3);
+            const arrayBufferSize = gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE) || 0;
+            gl.drawArrays(gl.POINTS, 0, arrayBufferSize / 6);
         };
 
         this.setup();
