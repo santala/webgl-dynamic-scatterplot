@@ -72,45 +72,14 @@ const webGL2VertexShaderSource = `
 const webGL2FragmentShaderSource = `
 `;
 
-const pixelRatio = window.devicePixelRatio || 1;
-const maxResolution = Math.max(window.screen.width, window.screen.height);
-
-
-const maxOverlap = 2**16 - 1; // Max Uint16 value
-const alphaResolution = 1000;
-
-const alphaInput = document.getElementById('alpha');
-const markerSizeInput = document.getElementById('marker-size');
-const colorInput = document.getElementById('color');
-
-alphaInput.setAttribute('min', (1 / alphaResolution).toString());
-alphaInput.setAttribute('step', (1 / alphaResolution).toString());
-markerSizeInput.setAttribute('min', pixelRatio.toString());
-
-const getWidth = () => canvas.clientWidth * pixelRatio;
-const getHeight = () => canvas.clientHeight * pixelRatio;
-const getAlpha = () => parseFloat(alphaInput.value);
-const getMarkerSize = () => parseInt(markerSizeInput.value);
-const getColor = () => colorInput.value;
-
-
-let width = -1;
-let height = -1;
-let alpha = getAlpha();
-let markerSize = getMarkerSize();
-let colorHex = getColor();
-
-function hex2rgb(hex) {
-    const hexValues = (/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex) || [null, "00", "00", "00"]).slice(1);
-    return hexValues.map(v => (parseInt(v, 16) || 0) / 256);
-}
-
 let alphaLookupTable;
 
 function computeLookupData(gl) {
+    const alphaResolution = 1000;
+
     const maxTextureSize = Math.floor(gl.getParameter(gl.MAX_TEXTURE_SIZE));
     const height = Math.min(maxTextureSize, alphaResolution);
-    let width = Math.min(maxTextureSize, maxOverlap);
+    let width = Math.min(maxTextureSize, 2**16 - 1);
 
     const lookupTable = new Array(height);
 
@@ -170,13 +139,19 @@ export default class Scatterplot {
 
         this.program = glUtil.createProgram(gl, [vertexShader, fragmentShader]);
 
+        this.width = canvas.width;
+        this.height = canvas.height;
+        this.pointSize = 3;
+        this.color = "#ffaa33";
+        this.alpha = .5;
+
         this.pointsUint16 = null;
 
         this.loadData = (url) => {
             const points = [];
             const groupOffsets = [];
 
-            fetch("./example-data/isabel_250k.csv").then(res => res.text()).then(csv => {
+            return fetch("./example-data/isabel_250k.csv").then(res => res.text()).then(csv => {
                 console.log('Parsing CSV...');
 
                 const lines = csv.split("\n");
@@ -246,10 +221,40 @@ export default class Scatterplot {
                 console.log(`Rendering ${this.pointsUint16.length / 3} groups...`);
                 this.render();
             });
+        };
 
+        this.updateDesign = ({ width, height, pointSize, color, alpha}) => {
+            console.log(width, height);
+            width = width || this.width;
+            height = height || this.height;
+            pointSize = pointSize || this.pointSize;
+            color = color || this.color;
+            alpha = alpha || this.alpha;
+
+            if (width !== this.width || height !== this.height ||
+                pointSize !== this.pointSize || color !== this.color || alpha !== this.alpha
+            ) {
+                this.width = width;
+                this.height = height;
+                this.pointSize = pointSize;
+                this.color = color;
+                this.alpha = alpha;
+
+                this.canvas.width = this.width;
+                this.canvas.height = this.height;
+
+                console.log("Design updated. Rendering…");
+                console.log(this.width, this.height)
+                this.render();
+            } else {
+                console.log("Design not updated.");
+            }
         };
 
         this.render = () => {
+            if (!this.pointsUint16) {
+                return;
+            }
             const gl = this.gl;
             const program = this.program;
 
@@ -298,12 +303,12 @@ export default class Scatterplot {
             // Tell the position attribute how to get data out of positionBuffer (ARRAY_BUFFER)
             gl.vertexAttribPointer(attributes["a_position"], 3, gl.UNSIGNED_SHORT, false, 0, 0);
 
-            uniforms.pointSize = getMarkerSize();
-            uniforms.alpha = getAlpha();
-            console.log("alpha", getAlpha());
+            uniforms.pointSize = this.pointSize;
+            uniforms.alpha = this.alpha;
+            console.log("alpha", this.alpha);
             uniforms.maxPosition = 2**16 - 1;
             uniforms.resolution = [canvas.width, canvas.height];
-            uniforms.color = hex2rgb(colorHex);
+            uniforms.color = this.color;
 
             console.log(
                 uniforms.alpha, uniforms.color,
