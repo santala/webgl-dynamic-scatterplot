@@ -30,7 +30,7 @@ export function createProgram(gl, shaders) {
 }
 
 
-export function getAttributeLocations(gl, program, names) {
+export function getAttributeLocations(gl, program) {
     const attributeLocations = {};
     const n = gl.getProgramParameter(program, gl.ACTIVE_ATTRIBUTES);
 
