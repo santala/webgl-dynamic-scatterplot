@@ -17,7 +17,7 @@ const vertexShaderSource = `
     varying vec2 v_lookupTexCoord;
 
     void main() {
-        // Add padding accoring to point size
+        // Add padding according to point size
         vec2 relPointSize = u_pointSize / u_resolution;
         vec2 normalizedPositionWithPadding = (a_position.xy / u_maxPosition * 2.0 - 1.) * (1.-relPointSize);
         
@@ -246,7 +246,7 @@ function renderScatterPlot(gl, canvas, dataUint16) {
 
     gl.uniform1f(pointSizeLocation, getMarkerSize());
     gl.uniform1f(alphaLocation, getAlpha());
-    console.log('alpha', getAlpha())
+    console.log('alpha', getAlpha());
     gl.uniform1f(maxPositionLocation,2**16 - 1);
     gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
     gl.uniform3f(colorLocation, ...hex2rgb(colorHex));
