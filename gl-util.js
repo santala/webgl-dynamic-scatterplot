@@ -46,9 +46,35 @@ export function getAttributeLocations(gl, program) {
     return Object.freeze(attributeLocations);
 }
 
+
+export function createTexture(gl, { width, height, data }) {
+    const texture = gl.createTexture();
+
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.ALPHA, width, height, 0, gl.ALPHA, gl.UNSIGNED_BYTE, data);
+
+    return texture;
+}
+
+
 export function getUniforms(gl, program) {
     const uniforms = {};
     const n = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
+
+    let textureUnit = 0;
+
+    function getTextureSetter(gl, program, bindPoint, location, unit) {
+        return (texture) => {
+            gl.uniform1i(location, unit);
+            gl.activeTexture(gl.TEXTURE0 + unit);
+            gl.bindTexture(bindPoint, texture);
+        }
+    }
 
     try {
         for (let i = 0; i < n; i++) {
@@ -60,7 +86,7 @@ export function getUniforms(gl, program) {
             if (name.substr(0, 2) === "u_") {
                 name = name.substr(2);
             }
-            const setter = {
+            let setter = {
                 [gl.FLOAT]: v => typeof v === "number" ? gl.uniform1f(location, v) : gl.uniform1fv(location, v),
                 [gl.FLOAT_VEC2]: v => gl.uniform2f(location, ...v),
                 [gl.FLOAT_VEC3]: v => gl.uniform3f(location, ...v),
@@ -80,6 +106,12 @@ export function getUniforms(gl, program) {
                 [gl.FLOAT_MAT3]: v => gl.uniformMatrix3fv(location, false, v),
                 [gl.FLOAT_MAT4]: v => gl.uniformMatrix4fv(location, false, v),
             }[type];
+
+            if (type === gl.SAMPLER_2D || type === gl.SAMPLER_CUBE) {
+                const bindPoint = type === gl.SAMPLER_2D ? gl.TEXTURE_2D : gl.TEXTURE_CUBE_MAP;
+                setter = v => getTextureSetter(gl, program, bindPoint, location, textureUnit)(v)
+                textureUnit++;
+            }
             const getter = () => gl.getUniform(program, location);
 
             Object.defineProperty(uniforms, name, { set: setter, get: getter });

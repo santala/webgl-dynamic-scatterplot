@@ -259,6 +259,8 @@ export default class Scatterplot {
             this.attributes = glUtil.getAttributeLocations(gl, this.program);
             this.uniforms = glUtil.getUniforms(gl, this.program);
 
+            gl.useProgram(this.program);
+
             this.alphaLookupTable = computeLookupData(gl);
 
             // Turn on the position attribute
@@ -273,17 +275,17 @@ export default class Scatterplot {
             // For data textures where row width is not a multiple of 4
             gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
 
-            const lookupTableTexture = gl.createTexture();
-            gl.bindTexture(gl.TEXTURE_2D, lookupTableTexture);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            this.lookupTableTexture = glUtil.createTexture(gl, this.alphaLookupTable);
 
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.ALPHA, this.alphaLookupTable.width, this.alphaLookupTable.height,
-                0, gl.ALPHA, gl.UNSIGNED_BYTE, this.alphaLookupTable.data);
+            try {
+                this.uniforms.lookupTexWidth = this.alphaLookupTable.width;
+                this.uniforms.maxPosition = 2**16 - 1;
+            } catch (e) {
+                // Trying to set a uniform that doesn’t exist (e.g. due to a lost WebGL context)
+                // will lead to a TypeError
+                console.error("Context lost:", gl.isContextLost(), "Error:", e);
+            }
 
-            gl.useProgram(this.program);
             gl.enable(gl.BLEND);
             gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
@@ -291,16 +293,13 @@ export default class Scatterplot {
         };
 
         this.render = () => {
-            const { gl, uniforms, alphaLookupTable } = this;
+            const { gl, uniforms } = this;
 
             // Clear the canvas
             gl.clearColor(0, 0, 0, 0);
             gl.clear(gl.COLOR_BUFFER_BIT);
 
             try {
-                uniforms.lookupTexWidth = alphaLookupTable.width;
-                uniforms.maxPosition = 2**16 - 1;
-
                 uniforms.resolution = [canvas.width, canvas.height];
                 uniforms.pointSize = this.pointSize;
                 uniforms.color = this.color;
