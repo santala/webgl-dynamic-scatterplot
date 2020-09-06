@@ -84,7 +84,7 @@ const webGL2VertexShaderSource = `#version 300 es
         // Add padding according to point size
         vec2 relPointSize = u_pointSize / u_resolution;
         vec2 normalizedPositionWithPadding = (a_position.xy / u_maxPosition * 2.0 - 1.) * (1. - relPointSize);
-
+    
         gl_Position = vec4(normalizedPositionWithPadding, 0, 1);
         gl_PointSize = u_pointSize;
         v_pointCount = a_position.z;
@@ -104,6 +104,9 @@ const webGL2FragmentShaderSource = `#version 300 es
     */
 
     uniform sampler2D u_lookupTable;
+    uniform sampler2D u_markerOverlap;
+
+    uniform int u_phase;
 
     uniform vec3 u_color;
     uniform float u_alpha;
@@ -114,16 +117,21 @@ const webGL2FragmentShaderSource = `#version 300 es
     in float v_pointCount;
     in vec2 v_lookupTexCoord;
 
-    out vec4 outputColor;
+    layout(location = 0) out vec4 outputColor;
+    layout(location = 1) out uint overlap;
 
     void main() {
-        if (v_pointCount == 0.) {
-            discard;
-        } else if (distance(gl_PointCoord, vec2(.5)) > 0.5) {
-            discard;
-        } else {
-            float opacity = texture(u_lookupTable, v_lookupTexCoord).a;
-            outputColor = vec4(u_color * opacity, opacity);
+        if (u_phase == 0) {
+            overlap = 255U;
+        } else if (u_phase == 1) {
+            if (v_pointCount == 0.) {
+                discard;
+            } else if (distance(gl_PointCoord, vec2(.5)) > 0.5) {
+                discard;
+            } else {
+                float opacity = texture(u_lookupTable, v_lookupTexCoord).a;
+                outputColor = vec4(u_color * opacity, opacity);
+            }
         }
     }
 `;
@@ -194,7 +202,7 @@ export default class Scatterplot {
         // If WebGL 2.0 isn’t supported, use WebGL 1.0
         this.gl = this.gl || this.canvas.getContext("webgl");
 
-        console.log("Using WebGL" + (this.useWebGL2 ? "2" : "1"));
+        console.log(`Using WebGL ${this.useWebGL2 ? 2 : 1}.0.`);
 
         this.width = canvas.width;
         this.height = canvas.height;
@@ -332,16 +340,15 @@ export default class Scatterplot {
             // For data textures where row width is not a multiple of 4
             gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
 
-            this.lookupTableTexture = glUtil.createTexture(gl, this.alphaLookupTable);
+            gl.activeTexture(gl.TEXTURE0);
 
-            try {
-                this.uniforms.lookupTexWidth = this.alphaLookupTable.width;
-                this.uniforms.maxPosition = 2**16 - 1;
-            } catch (e) {
-                // Trying to set a uniform that doesn’t exist (e.g. due to a lost WebGL context)
-                // will lead to a TypeError
-                console.error("Context lost:", gl.isContextLost(), "Error:", e);
-            }
+            this.lookupTableTexture = glUtil.createTexture({
+                gl, ...this.alphaLookupTable, type: gl.UNSIGNED_BYTE, format: gl.ALPHA
+            });
+
+
+            this.uniforms.lookupTexWidth = this.alphaLookupTable.width;
+            this.uniforms.maxPosition = 2**16 - 1;
 
             gl.enable(gl.BLEND);
             gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -353,29 +360,55 @@ export default class Scatterplot {
             this.render = () => {
                 const { gl, uniforms } = this;
 
-                // Clear the canvas
-                gl.clearColor(0, 0, 0, 0);
-                gl.clear(gl.COLOR_BUFFER_BIT);
-
                 uniforms.resolution = [canvas.width, canvas.height];
                 uniforms.pointSize = this.pointSize;
                 uniforms.color = this.color;
                 uniforms.alpha = this.alpha;
 
+                uniforms.phase = 0; // Marker overlap
+
+                // Create a texture to render to
+                const markerOverlapTexture = glUtil.createTexture({
+                    gl, width: canvas.width, height: canvas.height,
+                    format: gl.RED_INTEGER, internalFormat: gl.R32UI, type: gl.UNSIGNED_INT
+                });
+
+                this.uniforms.lookupTable = this.lookupTableTexture;
+                this.uniforms.markerOverlap = markerOverlapTexture;
+
+                const arrayBufferSize = gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE);
+
+                const fb = gl.createFramebuffer();
+                gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+                gl.viewport(0, 0, canvas.width, canvas.height);
+
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, markerOverlapTexture, 0);
+
+                gl.drawBuffers([gl.NONE, gl.COLOR_ATTACHMENT1]);
+
+                gl.clearBufferuiv(gl.COLOR, 1, [0.0, 0.0, 0.0, 0.0]);
+
+                if (arrayBufferSize) {
+                    gl.drawArrays(gl.POINTS, 0, arrayBufferSize / 6);
+                }
+
+                uniforms.phase = 1; // Final image
+
                 gl.bindFramebuffer(gl.FRAMEBUFFER, null);
                 gl.viewport(0, 0, canvas.width, canvas.height);
-                //gl.drawArrays(gl.POINTS, 0, this.pointsUint16.length / 3);
-                const arrayBufferSize = gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE) || 0;
-                gl.drawArrays(gl.POINTS, 0, arrayBufferSize / 6);
+
+                // Clear the canvas
+                gl.clearColor(0, 0, 0, 0);
+                gl.clear(gl.COLOR_BUFFER_BIT);
+
+                if (arrayBufferSize) {
+                    gl.drawArrays(gl.POINTS, 0, arrayBufferSize / 6);
+                }
             };
         } else {
             this.render = () => {
                 const { gl, uniforms } = this;
 
-                // Clear the canvas
-                gl.clearColor(0, 0, 0, 0);
-                gl.clear(gl.COLOR_BUFFER_BIT);
-
                 uniforms.resolution = [canvas.width, canvas.height];
                 uniforms.pointSize = this.pointSize;
                 uniforms.color = this.color;
@@ -383,9 +416,16 @@ export default class Scatterplot {
 
                 gl.bindFramebuffer(gl.FRAMEBUFFER, null);
                 gl.viewport(0, 0, canvas.width, canvas.height);
+
+                // Clear the canvas
+                gl.clearColor(0, 0, 0, 0);
+                gl.clear(gl.COLOR_BUFFER_BIT);
+
                 //gl.drawArrays(gl.POINTS, 0, this.pointsUint16.length / 3);
-                const arrayBufferSize = gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE) || 0;
-                gl.drawArrays(gl.POINTS, 0, arrayBufferSize / 6);
+                const arrayBufferSize = gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE);
+                if (arrayBufferSize) {
+                    gl.drawArrays(gl.POINTS, 0, arrayBufferSize / 6);
+                }
             };
         }
 

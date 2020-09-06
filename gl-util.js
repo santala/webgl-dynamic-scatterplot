@@ -47,16 +47,18 @@ export function getAttributeLocations(gl, program) {
 }
 
 
-export function createTexture(gl, { width, height, data }) {
-    const texture = gl.createTexture();
+export function createTexture({ gl, width, height, data = null, format = gl.RGBA, internalFormat, type = gl.UNSIGNED_BYTE }) {
+    internalFormat = internalFormat || format;
 
+    const texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
+
+    gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, width, height, 0, format, type, data);
+
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.ALPHA, width, height, 0, gl.ALPHA, gl.UNSIGNED_BYTE, data);
 
     return texture;
 }
@@ -105,6 +107,8 @@ export function getUniforms(gl, program) {
                 [gl.FLOAT_MAT2]: v => gl.uniformMatrix2fv(location, false, v),
                 [gl.FLOAT_MAT3]: v => gl.uniformMatrix3fv(location, false, v),
                 [gl.FLOAT_MAT4]: v => gl.uniformMatrix4fv(location, false, v),
+
+                //[gl.SAMPLER_2D]: v => gl.uniform1i(location, v),
             }[type];
 
             if (type === gl.SAMPLER_2D || type === gl.SAMPLER_CUBE) {
