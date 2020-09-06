@@ -26,7 +26,7 @@ const webGL1VertexShaderSource = `
         gl_Position = vec4(normalizedPositionWithPadding, 0, 1);
         gl_PointSize = u_pointSize;
         v_pointCount = a_position.z;
-        v_lookupTexCoord = vec2((v_pointCount + .5) / u_lookupTexWidth, u_alpha); // compute alpha lookup texture coordinate
+        v_lookupTexCoord = vec2((v_pointCount + .5) / (u_lookupTexWidth - 1.), u_alpha); // compute alpha lookup texture coordinate
     }
 `;
 
@@ -65,11 +65,67 @@ const webGL1FragmentShaderSource = `
 `;
 
 // language=glsl
-const webGL2VertexShaderSource = `
+const webGL2VertexShaderSource = `#version 300 es
+    precision mediump float;
+    precision mediump int;
+
+    in vec3 a_position;
+
+    uniform float u_maxPosition;
+    uniform vec2 u_resolution;
+    uniform float u_pointSize;
+    uniform float u_lookupTexWidth;
+    uniform float u_alpha;
+
+    out float v_pointCount;
+    out vec2 v_lookupTexCoord;
+
+    void main() {
+        // Add padding according to point size
+        vec2 relPointSize = u_pointSize / u_resolution;
+        vec2 normalizedPositionWithPadding = (a_position.xy / u_maxPosition * 2.0 - 1.) * (1. - relPointSize);
+
+        gl_Position = vec4(normalizedPositionWithPadding, 0, 1);
+        gl_PointSize = u_pointSize;
+        v_pointCount = a_position.z;
+        v_lookupTexCoord = vec2((v_pointCount + .5) / (u_lookupTexWidth - 1.), u_alpha); // compute alpha lookup texture coordinate
+    }
 `;
 
 // language=glsl
-const webGL2FragmentShaderSource = `
+const webGL2FragmentShaderSource = `#version 300 es
+    precision mediump float;
+    precision mediump int;
+
+    /* Built-in inputs
+    in vec4 gl_FragCoord;
+    in bool gl_FrontFacing;
+    in vec2 gl_PointCoord;
+    */
+
+    uniform sampler2D u_lookupTable;
+
+    uniform vec3 u_color;
+    uniform float u_alpha;
+    uniform float u_lookupTexWidth;
+    uniform float u_pointSize;
+
+    // Overlap passed in from the vertex shader
+    in float v_pointCount;
+    in vec2 v_lookupTexCoord;
+
+    out vec4 outputColor;
+
+    void main() {
+        if (v_pointCount == 0.) {
+            discard;
+        } else if (distance(gl_PointCoord, vec2(.5)) > 0.5) {
+            discard;
+        } else {
+            float opacity = texture(u_lookupTable, v_lookupTexCoord).a;
+            outputColor = vec4(u_color * opacity, opacity);
+        }
+    }
 `;
 
 function computeLookupData(gl) {
@@ -129,7 +185,7 @@ export default class Scatterplot {
         });
         canvas.addEventListener("webglcontextrestored", (e) => {
             console.log("WebGL context restored.");
-            canvas.loseContextInNCalls(Math.round(Math.random() * 1000));
+            //canvas.loseContextInNCalls(Math.round(Math.random() * 1000));
             this.setup();
         });
 
@@ -137,6 +193,8 @@ export default class Scatterplot {
         this.useWebGL2 = !!this.gl;
         // If WebGL 2.0 isn’t supported, use WebGL 1.0
         this.gl = this.gl || this.canvas.getContext("webgl");
+
+        console.log("Using WebGL" + (this.useWebGL2 ? "2" : "1"));
 
         this.width = canvas.width;
         this.height = canvas.height;
@@ -217,8 +275,7 @@ export default class Scatterplot {
 
                 this.pointsUint16 = new Uint16Array(points);
 
-                console.log(`Rendering ${this.pointsUint16.length / 3} groups...`);
-                this.render();
+                this.setup();
             });
         };
 
@@ -292,30 +349,45 @@ export default class Scatterplot {
             this.render();
         };
 
-        this.render = () => {
-            const { gl, uniforms } = this;
+        if (this.useWebGL2) {
+            this.render = () => {
+                const { gl, uniforms } = this;
 
-            // Clear the canvas
-            gl.clearColor(0, 0, 0, 0);
-            gl.clear(gl.COLOR_BUFFER_BIT);
+                // Clear the canvas
+                gl.clearColor(0, 0, 0, 0);
+                gl.clear(gl.COLOR_BUFFER_BIT);
 
-            try {
                 uniforms.resolution = [canvas.width, canvas.height];
                 uniforms.pointSize = this.pointSize;
                 uniforms.color = this.color;
                 uniforms.alpha = this.alpha;
-            } catch (e) {
-                // Trying to set a uniform that doesn’t exist (e.g. due to a lost WebGL context)
-                // will lead to a TypeError
-                console.error("Context lost:", gl.isContextLost(), "Error:", e);
-            }
 
-            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-            gl.viewport(0, 0, canvas.width, canvas.height);
-            //gl.drawArrays(gl.POINTS, 0, this.pointsUint16.length / 3);
-            const arrayBufferSize = gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE) || 0;
-            gl.drawArrays(gl.POINTS, 0, arrayBufferSize / 6);
-        };
+                gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+                gl.viewport(0, 0, canvas.width, canvas.height);
+                //gl.drawArrays(gl.POINTS, 0, this.pointsUint16.length / 3);
+                const arrayBufferSize = gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE) || 0;
+                gl.drawArrays(gl.POINTS, 0, arrayBufferSize / 6);
+            };
+        } else {
+            this.render = () => {
+                const { gl, uniforms } = this;
+
+                // Clear the canvas
+                gl.clearColor(0, 0, 0, 0);
+                gl.clear(gl.COLOR_BUFFER_BIT);
+
+                uniforms.resolution = [canvas.width, canvas.height];
+                uniforms.pointSize = this.pointSize;
+                uniforms.color = this.color;
+                uniforms.alpha = this.alpha;
+
+                gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+                gl.viewport(0, 0, canvas.width, canvas.height);
+                //gl.drawArrays(gl.POINTS, 0, this.pointsUint16.length / 3);
+                const arrayBufferSize = gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE) || 0;
+                gl.drawArrays(gl.POINTS, 0, arrayBufferSize / 6);
+            };
+        }
 
         this.setup();
     }
