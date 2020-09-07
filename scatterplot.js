@@ -104,7 +104,7 @@ const webGL2FragmentShaderSource = `#version 300 es
     */
 
     uniform sampler2D u_lookupTable;
-    uniform sampler2D u_markerOverlap;
+    uniform mediump usampler2D u_markerOverlap;
 
     uniform int u_phase;
 
@@ -122,9 +122,10 @@ const webGL2FragmentShaderSource = `#version 300 es
 
     void main() {
         if (u_phase == 0) {
-            overlap = 255U;
+            overlap = uint(v_pointCount);
         } else if (u_phase == 1) {
-            if (v_pointCount == 0.) {
+            uint pointCount = texture(u_markerOverlap, gl_FragCoord.xy).a;
+            if (pointCount == 0U) {
                 discard;
             } else if (distance(gl_PointCoord, vec2(.5)) > 0.5) {
                 discard;
@@ -340,8 +341,6 @@ export default class Scatterplot {
             // For data textures where row width is not a multiple of 4
             gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
 
-            gl.activeTexture(gl.TEXTURE0);
-
             this.lookupTableTexture = glUtil.createTexture({
                 gl, ...this.alphaLookupTable, type: gl.UNSIGNED_BYTE, format: gl.ALPHA
             });
@@ -374,17 +373,16 @@ export default class Scatterplot {
                 });
 
                 this.uniforms.lookupTable = this.lookupTableTexture;
-                this.uniforms.markerOverlap = markerOverlapTexture;
 
                 const arrayBufferSize = gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE);
 
                 const fb = gl.createFramebuffer();
                 gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-                gl.viewport(0, 0, canvas.width, canvas.height);
-
                 gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, markerOverlapTexture, 0);
 
                 gl.drawBuffers([gl.NONE, gl.COLOR_ATTACHMENT1]);
+
+                gl.viewport(0, 0, canvas.width, canvas.height);
 
                 gl.clearBufferuiv(gl.COLOR, 1, [0.0, 0.0, 0.0, 0.0]);
 
@@ -392,10 +390,13 @@ export default class Scatterplot {
                     gl.drawArrays(gl.POINTS, 0, arrayBufferSize / 6);
                 }
 
-                uniforms.phase = 1; // Final image
-
                 gl.bindFramebuffer(gl.FRAMEBUFFER, null);
                 gl.viewport(0, 0, canvas.width, canvas.height);
+
+                uniforms.phase = 1; // Final image
+
+                this.uniforms.markerOverlap = markerOverlapTexture;
+                this.uniforms.lookupTable = this.lookupTableTexture;
 
                 // Clear the canvas
                 gl.clearColor(0, 0, 0, 0);

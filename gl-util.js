@@ -71,6 +71,7 @@ export function getUniforms(gl, program) {
     let textureUnit = 0;
 
     function getTextureSetter(gl, program, bindPoint, location, unit) {
+        console.log(unit);
         return (texture) => {
             gl.uniform1i(location, unit);
             gl.activeTexture(gl.TEXTURE0 + unit);
@@ -78,50 +79,63 @@ export function getUniforms(gl, program) {
         }
     }
 
-    try {
-        for (let i = 0; i < n; i++) {
-            let { name, type } = gl.getActiveUniform(program, i) || {};
-            const location = gl.getUniformLocation(program, name);
-            if (name.substr(-3) === "[0]") {
-                name = name.substr(0, name.length - 3);
+    for (let i = 0; i < n; i++) {
+        let { name, type } = gl.getActiveUniform(program, i) || {};
+        const location = gl.getUniformLocation(program, name);
+        if (name.substr(-3) === "[0]") {
+            name = name.substr(0, name.length - 3);
+        }
+        if (name.substr(0, 2) === "u_") {
+            name = name.substr(2);
+        }
+        let setter = {
+            [gl.FLOAT]: v => typeof v === "number" ? gl.uniform1f(location, v) : gl.uniform1fv(location, v),
+            [gl.FLOAT_VEC2]: v => gl.uniform2f(location, ...v),
+            [gl.FLOAT_VEC3]: v => gl.uniform3f(location, ...v),
+            [gl.FLOAT_VEC4]: v => gl.uniform4f(location, ...v),
+
+            [gl.INT]: v => typeof v === "number" ? gl.uniform1i(location, v) : gl.uniform1iv(location, v),
+            [gl.INT_VEC2]: v => gl.uniform2i(location, ...v),
+            [gl.INT_VEC3]: v => gl.uniform3i(location, ...v),
+            [gl.INT_VEC4]: v => gl.uniform4i(location, ...v),
+
+            [gl.BOOL]: v => typeof v === "number" ? gl.uniform1i(location, v) : gl.uniform1iv(location, v),
+            [gl.BOOL_VEC2]: v => gl.uniform2i(location, ...v),
+            [gl.BOOL_VEC3]: v => gl.uniform3i(location, ...v),
+            [gl.BOOL_VEC4]: v => gl.uniform4i(location, ...v),
+
+            [gl.FLOAT_MAT2]: v => gl.uniformMatrix2fv(location, false, v),
+            [gl.FLOAT_MAT3]: v => gl.uniformMatrix3fv(location, false, v),
+            [gl.FLOAT_MAT4]: v => gl.uniformMatrix4fv(location, false, v),
+
+            //[gl.SAMPLER_2D]: v => gl.uniform1i(location, v),
+        }[type];
+
+        if (!setter) {
+            let samplerBindPoint;
+            if ([gl.SAMPLER_2D, gl.UNSIGNED_INT_SAMPLER_2D].includes(type)) {
+                samplerBindPoint = gl.TEXTURE_2D;
+            } else if ([gl.SAMPLER_CUBE].includes(type)) {
+                samplerBindPoint = gl.TEXTURE_CUBE_MAP;
             }
-            if (name.substr(0, 2) === "u_") {
-                name = name.substr(2);
-            }
-            let setter = {
-                [gl.FLOAT]: v => typeof v === "number" ? gl.uniform1f(location, v) : gl.uniform1fv(location, v),
-                [gl.FLOAT_VEC2]: v => gl.uniform2f(location, ...v),
-                [gl.FLOAT_VEC3]: v => gl.uniform3f(location, ...v),
-                [gl.FLOAT_VEC4]: v => gl.uniform4f(location, ...v),
-
-                [gl.INT]: v => typeof v === "number" ? gl.uniform1i(location, v) : gl.uniform1iv(location, v),
-                [gl.INT_VEC2]: v => gl.uniform2i(location, ...v),
-                [gl.INT_VEC3]: v => gl.uniform3i(location, ...v),
-                [gl.INT_VEC4]: v => gl.uniform4i(location, ...v),
-
-                [gl.BOOL]: v => typeof v === "number" ? gl.uniform1i(location, v) : gl.uniform1iv(location, v),
-                [gl.BOOL_VEC2]: v => gl.uniform2i(location, ...v),
-                [gl.BOOL_VEC3]: v => gl.uniform3i(location, ...v),
-                [gl.BOOL_VEC4]: v => gl.uniform4i(location, ...v),
-
-                [gl.FLOAT_MAT2]: v => gl.uniformMatrix2fv(location, false, v),
-                [gl.FLOAT_MAT3]: v => gl.uniformMatrix3fv(location, false, v),
-                [gl.FLOAT_MAT4]: v => gl.uniformMatrix4fv(location, false, v),
-
-                //[gl.SAMPLER_2D]: v => gl.uniform1i(location, v),
-            }[type];
-
-            if (type === gl.SAMPLER_2D || type === gl.SAMPLER_CUBE) {
-                const bindPoint = type === gl.SAMPLER_2D ? gl.TEXTURE_2D : gl.TEXTURE_CUBE_MAP;
-                setter = v => getTextureSetter(gl, program, bindPoint, location, textureUnit)(v)
+            if (!!samplerBindPoint) {
+                const textureSetter = getTextureSetter(gl, program, samplerBindPoint, location, textureUnit);
+                setter = v => textureSetter(v);
                 textureUnit++;
             }
-            const getter = () => gl.getUniform(program, location);
-
-            Object.defineProperty(uniforms, name, { set: setter, get: getter });
         }
-    } catch (e) {
-        console.error("Context lost:", gl.isContextLost(), "Error:", e);
+
+        if (!setter) {
+            throw Error(`No getter found for uniform ‘${name}’, type 0x${type.toString(16)}.`);
+        }
+
+        const getter = () => gl.getUniform(program, location);
+
+        try {
+            Object.defineProperty(uniforms, name, { set: setter, get: getter });
+        } catch (e) {
+            console.error("Context lost:", gl.isContextLost(), "Error:", e);
+        }
     }
     return uniforms;
 }
