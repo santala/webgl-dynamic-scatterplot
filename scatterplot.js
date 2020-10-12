@@ -77,18 +77,23 @@ const webGL2VertexShaderSource = `#version 300 es
     uniform float u_lookupTexWidth;
     uniform float u_alpha;
 
+    uniform int u_phase;
+
     out float v_pointCount;
-    out vec2 v_lookupTexCoord;
+    out vec2 v_coord;
 
     void main() {
-        // Add padding according to point size
-        vec2 relPointSize = u_pointSize / u_resolution;
-        vec2 normalizedPositionWithPadding = (a_position.xy / u_maxPosition * 2.0 - 1.) * (1. - relPointSize);
-    
-        gl_Position = vec4(normalizedPositionWithPadding, 0, 1);
-        gl_PointSize = u_pointSize;
-        v_pointCount = a_position.z;
-        v_lookupTexCoord = vec2((v_pointCount + .5) / (u_lookupTexWidth - 1.), u_alpha); // compute alpha lookup texture coordinate
+        if (u_phase == 0) {
+            // Add padding according to point size
+            vec2 relPointSize = u_pointSize / u_resolution;
+            vec2 normalizedPositionWithPadding = (a_position.xy / u_maxPosition * 2.0 - 1.) * (1. - relPointSize);
+            gl_Position = vec4(normalizedPositionWithPadding, 0, 1);
+            gl_PointSize = u_pointSize;
+            v_pointCount = a_position.z;
+        } else {
+            gl_Position = vec4(a_position.xy, 0, 1);
+            v_coord = (a_position.xy + vec2(1.)) / 2.;
+        }
     }
 `;
 
@@ -115,7 +120,7 @@ const webGL2FragmentShaderSource = `#version 300 es
 
     // Overlap passed in from the vertex shader
     in float v_pointCount;
-    in vec2 v_lookupTexCoord;
+    in vec2 v_coord;
 
     layout(location = 0) out vec4 outputColor;
     layout(location = 1) out uint overlap;
@@ -123,14 +128,16 @@ const webGL2FragmentShaderSource = `#version 300 es
     void main() {
         if (u_phase == 0) {
             overlap = uint(v_pointCount);
-        } else if (u_phase == 1) {
-            uint pointCount = texture(u_markerOverlap, gl_FragCoord.xy).a;
-            if (pointCount == 0U) {
-                discard;
-            } else if (distance(gl_PointCoord, vec2(.5)) > 0.5) {
+        } else {
+            float pointCount = float(texture(u_markerOverlap, v_coord.xy).r);
+            //float pointCount = float(texture(u_markerOverlap, vec2(.0)).a);
+            if (pointCount == 0.) {
                 discard;
             } else {
-                float opacity = texture(u_lookupTable, v_lookupTexCoord).a;
+                // Compute alpha lookup texture coordinate
+                //vec2 lookupTexCoord = vec2((float(pointCount) + .5) / (u_lookupTexWidth - 1.), u_alpha);
+                //float opacity = texture(u_lookupTable, lookupTexCoord).a;
+                float opacity = 1. - pow(1. - u_alpha, pointCount);
                 outputColor = vec4(u_color * opacity, opacity);
             }
         }
@@ -341,9 +348,22 @@ export default class Scatterplot {
             // For data textures where row width is not a multiple of 4
             gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
 
+            /*
             this.lookupTableTexture = glUtil.createTexture({
                 gl, ...this.alphaLookupTable, type: gl.UNSIGNED_BYTE, format: gl.ALPHA
             });
+            */
+            this.lookupTableTexture = gl.createTexture();
+            gl.activeTexture(gl.TEXTURE0 + 0);
+            gl.bindTexture(gl.TEXTURE_2D, this.lookupTableTexture);
+            gl.uniform1i(gl.getUniformLocation(this.program, "u_lookupTable"), 0);
+
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.ALPHA, this.alphaLookupTable.width, this.alphaLookupTable.height, 0, gl.ALPHA, gl.UNSIGNED_BYTE, this.alphaLookupTable.data);
+
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
 
 
             this.uniforms.lookupTexWidth = this.alphaLookupTable.width;
@@ -357,54 +377,132 @@ export default class Scatterplot {
 
         if (this.useWebGL2) {
             this.render = () => {
-                const { gl, uniforms } = this;
+                /*
+                * 1. Marker density (opaque markers, additive blend mode, render to data texture)
+                * 2. Alpha (render from texture LUT)
+                * */
+
+                const { gl, program, uniforms } = this;
 
                 uniforms.resolution = [canvas.width, canvas.height];
                 uniforms.pointSize = this.pointSize;
                 uniforms.color = this.color;
                 uniforms.alpha = this.alpha;
 
-                uniforms.phase = 0; // Marker overlap
+                // PHASE 0: Marker Overlap
+                uniforms.phase = 0;
 
                 // Create a texture to render to
+                const markerOverlapTexture = gl.createTexture();
+                gl.activeTexture(gl.TEXTURE0 + 1);
+                gl.bindTexture(gl.TEXTURE_2D, markerOverlapTexture);
+                gl.uniform1i(gl.getUniformLocation(program, "u_markerOverlap"), 1);
+
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32UI, canvas.width, canvas.height, 0, gl.RED_INTEGER, gl.UNSIGNED_INT, null);
+
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+                /*
                 const markerOverlapTexture = glUtil.createTexture({
                     gl, width: canvas.width, height: canvas.height,
                     format: gl.RED_INTEGER, internalFormat: gl.R32UI, type: gl.UNSIGNED_INT
                 });
+                */
 
-                this.uniforms.lookupTable = this.lookupTableTexture;
+                gl.bindBuffer(gl.ARRAY_BUFFER, this.positionBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, this.pointsUint16, gl.DYNAMIC_DRAW);
+                // Tell the position attribute how to get data out of positionBuffer (ARRAY_BUFFER)
+                gl.vertexAttribPointer(this.attributes.position, 3, gl.UNSIGNED_SHORT, false, 0, 0);
 
                 const arrayBufferSize = gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE);
-
-                const fb = gl.createFramebuffer();
-                gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, markerOverlapTexture, 0);
-
-                gl.drawBuffers([gl.NONE, gl.COLOR_ATTACHMENT1]);
-
-                gl.viewport(0, 0, canvas.width, canvas.height);
-
-                gl.clearBufferuiv(gl.COLOR, 1, [0.0, 0.0, 0.0, 0.0]);
-
-                if (arrayBufferSize) {
-                    gl.drawArrays(gl.POINTS, 0, arrayBufferSize / 6);
+                if (!arrayBufferSize) {
+                    return;
                 }
+
+
+                const emptyTexture = gl.createTexture();
+                gl.activeTexture(gl.TEXTURE0 + 2);
+                gl.bindTexture(gl.TEXTURE_2D, emptyTexture);
+                gl.uniform1i(gl.getUniformLocation(program, "u_markerOverlap"), 2);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32UI, canvas.width, canvas.height, 0, gl.RED_INTEGER, gl.UNSIGNED_INT, null);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+                //this.uniforms.lookupTable = this.lookupTableTexture;
+                gl.uniform1i(gl.getUniformLocation(program, "u_lookupTable"), 0);
+                gl.activeTexture(gl.TEXTURE0 + 0);
+                gl.bindTexture(gl.TEXTURE_2D, this.lookupTableTexture);
+
+
+                if (true) {
+
+
+                    const fb = gl.createFramebuffer();
+                    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+                    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, markerOverlapTexture, 0);
+
+                    gl.drawBuffers([gl.NONE, gl.COLOR_ATTACHMENT1]);
+
+                    gl.viewport(0, 0, canvas.width, canvas.height);
+
+                    gl.clearBufferuiv(gl.COLOR, 1, [0.0, 0.0, 0.0, 0.0]);
+
+                    gl.blendFunc(gl.ONE, gl.ONE);
+
+                    gl.drawArrays(gl.POINTS, 0, arrayBufferSize / 6);
+
+                }
+
+                let pixels = new Uint32Array(gl.drawingBufferWidth * gl.drawingBufferHeight);
+                gl.readBuffer(gl.COLOR_ATTACHMENT1);
+                gl.readPixels(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight, gl.RED_INTEGER, gl.UNSIGNED_INT, pixels);
+                console.log(`${pixels.filter(v => v > 0).length} / ${pixels.length}`);
+                console.log(pixels);
+
+
+                // PHASE 1: Alpha Channel
 
                 gl.bindFramebuffer(gl.FRAMEBUFFER, null);
                 gl.viewport(0, 0, canvas.width, canvas.height);
 
-                uniforms.phase = 1; // Final image
+                uniforms.phase = 1;
 
-                this.uniforms.markerOverlap = markerOverlapTexture;
-                this.uniforms.lookupTable = this.lookupTableTexture;
+                //this.uniforms.markerOverlap = markerOverlapTexture;
+                //this.uniforms.lookupTable = this.lookupTableTexture;
+
+                gl.uniform1i(gl.getUniformLocation(program, "u_lookupTable"), 0);
+                gl.activeTexture(gl.TEXTURE0 + 1);
+                gl.bindTexture(gl.TEXTURE_2D, markerOverlapTexture);
+                gl.uniform1i(gl.getUniformLocation(program, "u_markerOverlap"), 1);
 
                 // Clear the canvas
-                gl.clearColor(0, 0, 0, 0);
+                gl.clearColor(0,0,0,0);
                 gl.clear(gl.COLOR_BUFFER_BIT);
 
-                if (arrayBufferSize) {
-                    gl.drawArrays(gl.POINTS, 0, arrayBufferSize / 6);
-                }
+                const texCoordBuffer = gl.createBuffer();
+                gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+                    -1.0,  -1.0,
+                     1.0,  -1.0,
+                    -1.0,   1.0,
+                    -1.0,   1.0,
+                     1.0,  -1.0,
+                     1.0,   1.0,
+                ]), gl.STATIC_DRAW);
+                gl.vertexAttribPointer(this.attributes.position, 2, gl.FLOAT, false, 0, 0);
+
+                gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+                pixels = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
+                gl.readBuffer(gl.BACK);
+                gl.readPixels(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+                console.log(pixels);
             };
         } else {
             this.render = () => {

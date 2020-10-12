@@ -14,8 +14,10 @@ let canvas = document.getElementById("canvas");
 
 canvas = WebGLDebugUtils.makeLostContextSimulatingCanvas(canvas);
 const nCalls = Math.round(Math.random() * 100);
-console.log("loseContextInNCalls", nCalls);
-//canvas.loseContextInNCalls(nCalls);
+if (false) {
+    console.log("loseContextInNCalls", nCalls);
+    canvas.loseContextInNCalls(nCalls);
+}
 
 const alphaInput = document.getElementById('alpha');
 const markerSizeInput = document.getElementById('marker-size');
