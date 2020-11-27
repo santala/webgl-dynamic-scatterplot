@@ -1,5 +1,9 @@
 "use strict";
 
+export function getEnumName(gl, enumValue) {
+    return Object.getOwnPropertyNames(gl).find(propName => gl[propName] === enumValue);
+}
+
 export function compileShader(gl, shaderType, source) {
     const shader = gl.createShader(shaderType);
     gl.shaderSource(shader, source);

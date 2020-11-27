@@ -41,6 +41,7 @@ const plot = new Scatterplot({
 });
 
 const refreshDesign = () => {
+    console.log("Refreshing design");
     plot.updateDesign({
         width: getWidth(),
         height: getHeight(),

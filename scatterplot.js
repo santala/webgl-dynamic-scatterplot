@@ -109,7 +109,7 @@ const webGL2FragmentShaderSource = `#version 300 es
     */
 
     uniform sampler2D u_lookupTable;
-    uniform mediump usampler2D u_markerOverlap;
+    uniform sampler2D u_markerOverlap;
 
     uniform int u_phase;
 
@@ -123,13 +123,19 @@ const webGL2FragmentShaderSource = `#version 300 es
     in vec2 v_coord;
 
     layout(location = 0) out vec4 outputColor;
-    layout(location = 1) out uint overlap;
+    layout(location = 1) out float overlap;
 
     void main() {
         if (u_phase == 0) {
-            overlap = uint(v_pointCount);
+            if (v_pointCount == 0.) {
+                discard;
+            } else if (distance(gl_PointCoord, vec2(.5)) > 0.5) {
+                discard;
+            } else {
+                overlap = v_pointCount / 1000000.;
+            }
         } else {
-            float pointCount = float(texture(u_markerOverlap, v_coord.xy).r);
+            float pointCount = texture(u_markerOverlap, v_coord.xy).r * 1000000.;
             //float pointCount = float(texture(u_markerOverlap, vec2(.0)).a);
             if (pointCount == 0.) {
                 discard;
@@ -320,6 +326,7 @@ export default class Scatterplot {
 
         this.setup = () => {
             const gl = this.gl;
+            const ext = gl.getExtension('EXT_color_buffer_float');
 
             const vertexShaderSource = this.useWebGL2 ? webGL2VertexShaderSource : webGL1VertexShaderSource;
             const vertexShader = glUtil.compileShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
@@ -398,7 +405,7 @@ export default class Scatterplot {
                 gl.bindTexture(gl.TEXTURE_2D, markerOverlapTexture);
                 gl.uniform1i(gl.getUniformLocation(program, "u_markerOverlap"), 1);
 
-                gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32UI, canvas.width, canvas.height, 0, gl.RED_INTEGER, gl.UNSIGNED_INT, null);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, canvas.width, canvas.height, 0, gl.RED, gl.FLOAT, null);
 
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -426,7 +433,7 @@ export default class Scatterplot {
                 gl.activeTexture(gl.TEXTURE0 + 2);
                 gl.bindTexture(gl.TEXTURE_2D, emptyTexture);
                 gl.uniform1i(gl.getUniformLocation(program, "u_markerOverlap"), 2);
-                gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32UI, canvas.width, canvas.height, 0, gl.RED_INTEGER, gl.UNSIGNED_INT, null);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, canvas.width, canvas.height, 0, gl.RED, gl.FLOAT, null);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
                 gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -438,31 +445,36 @@ export default class Scatterplot {
                 gl.bindTexture(gl.TEXTURE_2D, this.lookupTableTexture);
 
 
-                if (true) {
 
 
-                    const fb = gl.createFramebuffer();
-                    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-                    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, markerOverlapTexture, 0);
+                const fb = gl.createFramebuffer();
+                gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+                gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, markerOverlapTexture, 0);
 
-                    gl.drawBuffers([gl.NONE, gl.COLOR_ATTACHMENT1]);
+                gl.drawBuffers([gl.NONE, gl.COLOR_ATTACHMENT1]);
 
-                    gl.viewport(0, 0, canvas.width, canvas.height);
+                gl.viewport(0, 0, canvas.width, canvas.height);
 
-                    gl.clearBufferuiv(gl.COLOR, 1, [0.0, 0.0, 0.0, 0.0]);
+                console.log(glUtil.getEnumName(gl, gl.checkFramebufferStatus(gl.FRAMEBUFFER)));
 
-                    gl.blendFunc(gl.ONE, gl.ONE);
+                gl.clearBufferfv(gl.COLOR, 1, [0.0, 0.0, 0.0, 0.0]);
 
-                    gl.drawArrays(gl.POINTS, 0, arrayBufferSize / 6);
+                gl.enable(gl.BLEND);
+                gl.blendEquation(gl.FUNC_ADD);
+                gl.blendFunc(gl.ONE, gl.ONE);
 
+                gl.drawArrays(gl.POINTS, 0, arrayBufferSize / 6);
+
+
+                let pixels;
+                if (false) {
+                    let pixels = new Uint32Array(gl.drawingBufferWidth * gl.drawingBufferHeight);
+                    gl.readBuffer(gl.COLOR_ATTACHMENT1);
+                    gl.readPixels(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight, gl.RED_INTEGER, gl.UNSIGNED_INT, pixels);
+                    let nonZero = pixels.filter(v => v > 0);
+                    console.log(`${nonZero.length} / ${pixels.length}`);
+                    console.log(nonZero.reduce((max, val) => Math.max(max, val)));
                 }
-
-                let pixels = new Uint32Array(gl.drawingBufferWidth * gl.drawingBufferHeight);
-                gl.readBuffer(gl.COLOR_ATTACHMENT1);
-                gl.readPixels(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight, gl.RED_INTEGER, gl.UNSIGNED_INT, pixels);
-                console.log(`${pixels.filter(v => v > 0).length} / ${pixels.length}`);
-                console.log(pixels);
-
 
                 // PHASE 1: Alpha Channel
 
@@ -502,7 +514,7 @@ export default class Scatterplot {
                 pixels = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
                 gl.readBuffer(gl.BACK);
                 gl.readPixels(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
-                console.log(pixels);
+                //console.log(pixels);
             };
         } else {
             this.render = () => {
