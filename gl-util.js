@@ -1,7 +1,12 @@
 "use strict";
 
+const enumNameCache = new Map();
+
 export function getEnumName(gl, enumValue) {
-    return Object.getOwnPropertyNames(gl).find(propName => gl[propName] === enumValue);
+    if (!enumNameCache.has(enumValue)) {
+        enumNameCache.set(enumValue, Object.getOwnPropertyNames(gl).find(propName => gl[propName] === enumValue));
+    }
+    return enumNameCache.get(enumValue);
 }
 
 export function compileShader(gl, shaderType, source) {
