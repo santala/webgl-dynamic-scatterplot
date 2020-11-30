@@ -108,6 +108,8 @@ const webGL2FragmentShaderSource = `#version 300 es
     in vec2 gl_PointCoord;
     */
 
+    const float maxOverlap = 1000000.;
+
     uniform sampler2D u_lookupTable;
     uniform sampler2D u_markerOverlap;
 
@@ -132,10 +134,10 @@ const webGL2FragmentShaderSource = `#version 300 es
             } else if (distance(gl_PointCoord, vec2(.5)) > 0.5) {
                 discard;
             } else {
-                overlap = v_pointCount / 1000000.;
+                overlap = v_pointCount / maxOverlap;
             }
         } else {
-            float pointCount = texture(u_markerOverlap, v_coord.xy).r * 1000000.;
+            float pointCount = round(texture(u_markerOverlap, v_coord.xy).r * maxOverlap);
             //float pointCount = float(texture(u_markerOverlap, vec2(.0)).a);
             if (pointCount == 0.) {
                 discard;
